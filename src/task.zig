@@ -7,6 +7,9 @@ pub const State = enum {
     // This is also the initial state of any task.
     Suspended,
 
+    // Task is ready to execute on a thread.
+    Staged,
+
     // Task is currently executing on some thread.
     Running,
 
@@ -19,17 +22,42 @@ pub const State = enum {
 
 // A shared item of contextual information that is useful
 // for a scheduler to interact with and make descitions on.
-pub const TaskContext = struct {
+pub const Context = struct {
 
     // Contains the function frame of the Task.
-    frame: anyframe = undefined,
+    frame: anyframe,
 
     // Describes the Task state.
-    state: State = .Suspended,
+    state: State,
 
-    // If state is Failed, will contain an error explaining
-    // the occurence and reason.
-    err: anyerror = undefined,
+    // If state is Failed, might contain an error explaining
+    // the occurence and reason. (TODO: figure out what to do with null)
+    err: ?anyerror,
+
+    // Function that starts the task.
+    runFn: fn (self: *Self) anyerror!void,
+
+    const Self = @This();
+
+    pub fn init(runFn: fn (self: *Self) anyerror!void) Self {
+        return .{
+            .frame = undefined,
+            .state = .Suspended,
+            .err = null,
+            .runFn = runFn,
+        };
+    }
+
+    pub fn run(self: *Self) anyerror!void {
+        // Suspend immediately, register task information.
+        suspend {
+            self.frame = @frame();
+            self.state = .Staged;
+        }
+
+        // We expect the rest to run on a another thread.
+        return self.runFn(self);
+    }
 };
 
 // A user define-able task that will be scheduled and executed in regular
@@ -37,24 +65,20 @@ pub const TaskContext = struct {
 // at the beginning of a Task's lifetime. Meanwhile run will contain the actual
 // code that will be scheduled to perform it's functions.
 pub fn Task(
-    comptime Context: type,
-    comptime setupFn: fn (ctx: *Context) anyerror!void,
-    comptime runFn: fn (ctx: *Context) anyerror!void,
+    comptime TaskContext: type,
+    comptime setupFn: fn (ctx: *TaskContext) anyerror!void,
+    comptime runFn: fn (ctx: *TaskContext) anyerror!void,
 ) type {
     return struct {
-        ctx: Context,
-        tCtx: TaskContext,
+        ctx: TaskContext,
+        schedCtx: Context,
 
         const Self = @This();
 
-        pub fn init(ctx: Context) Self {
+        pub fn init(ctx: TaskContext) Self {
             return .{
                 .ctx = ctx,
-                .tCtx = .{
-                    .frame = undefined,
-                    .state = .Suspended,
-                    .err = undefined,
-                },
+                .schedCtx = Context.init(run),
             };
         }
 
@@ -62,17 +86,18 @@ pub fn Task(
             return setupFn(&self.ctx);
         }
 
-        pub fn run(self: *Self) anyerror!void {
+        fn run(ctx: *Context) anyerror!void {
+            const self = @fieldParentPtr(Self, "schedCtx", ctx);
             return runFn(&self.ctx);
         }
 
-        pub fn context(self: *Self) *TaskContext {
-            return &self.tCtx;
+        pub fn context(self: *Self) *Context {
+            return &self.schedCtx;
         }
     };
 }
 
-test "Task is created with correct default context" {
+test "task is created with correct default context" {
     const MyTaskContext = struct {
         brownies: u8,
 
@@ -97,6 +122,9 @@ test "Task is created with correct default context" {
     try task.setup();
     assert(task.ctx.brownies == 5);
 
-    try task.run();
+    const ctx = task.context();
+
+    var result = async ctx.run();
+    try await result;
     assert(task.ctx.brownies == 35);
 }
