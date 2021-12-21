@@ -1,18 +1,30 @@
-const assert = @import("std").debug.assert;
+const std = @import("std");
+const sort = std.sort.sort;
 const task = @import("task.zig");
 
 const Entry = struct {
-    priotiry: u32,
+    priority: u32,
     context: *task.Context,
+
+    fn sort(ctx: void, a: Entry, b: Entry) bool {
+        return a.priority < b.priority;
+    }
 };
 
-pub fn Scheduler(
-    comptime tasks: []Entry,
-) type {
-    return struct {
-        tasks: []Entry,
-    };
-}
+pub const Scheduler = struct {
+    tasks: []const Entry,
+
+    const Self = @This();
+
+    pub fn init(comptime tasks: []Entry) Self {
+        comptime var sorted = sort(Entry, tasks, {}, Entry.sort);
+        return .{
+            .tasks = sorted,
+        };
+    }
+};
+
+usingnamespace std.testing;
 
 test "sorts at compile time" {
     const Brownies = struct {
@@ -30,13 +42,21 @@ test "sorts at compile time" {
     };
     const MyTask = task.Task(Brownies, Brownies.setup, Brownies.run);
 
-    var testTask = MyTask.init(.{
+    comptime var testTask = MyTask.init(.{
         .count = 0,
     });
-    assert(testTask.ctx.count == 0);
 
-    try testTask.setup();
-    assert(testTask.ctx.count == 1);
+    comptime var testTask2 = MyTask.init(.{
+        .count = 1,
+    });
 
-    // TODO: Complete compile time sorting of tasks.
+    comptime var tasks = [_]Entry{
+        .{ .priority = 12, .context = testTask.context() },
+        .{ .priority = 0, .context = testTask2.context() },
+    };
+
+    const sched = Scheduler.init(tasks[0..]);
+
+    try expect(sched.tasks[0].priority == 0);
+    try expect(sched.tasks[1].priority == 12);
 }
