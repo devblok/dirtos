@@ -1,7 +1,16 @@
-const assert = @import("std").debug.assert;
+const std = @import("std");
+const assert = std.debug.assert;
+
+// A shared item of contextual information that is useful
+// for a scheduler to interact with and make descitions on.
+pub const State = struct {
+
+    // Contains the function frame of the Task.
+    frame: anyframe,
+};
 
 // Describes the possible states that a Task can be in.
-pub const State = enum {
+pub const Status = enum {
 
     // Task has been completed, waiting for next iteration.
     // This is also the initial state of any task.
@@ -15,116 +24,45 @@ pub const State = enum {
 
     // Task is waiting for some precondition to resolve.
     Blocked,
-
-    // Task failed, it's execution stopped. Will not be scheduled.
-    Failed,
 };
 
-// A shared item of contextual information that is useful
-// for a scheduler to interact with and make descitions on.
-pub const Context = struct {
-
-    // Contains the function frame of the Task.
-    frame: anyframe,
-
-    // Describes the Task state.
-    state: State,
-
-    // If state is Failed, might contain an error explaining
-    // the occurence and reason. (TODO: figure out what to do with null)
-    err: ?anyerror,
-
-    // Function that starts the task.
-    runFn: fn (self: *Self) anyerror!void,
-
-    const Self = @This();
-
-    pub fn init(runFn: fn (self: *Self) anyerror!void) Self {
-        return .{
-            .frame = undefined,
-            .state = .Suspended,
-            .err = null,
-            .runFn = runFn,
-        };
-    }
-
-    pub fn run(self: *Self) anyerror!void {
-        // Suspend immediately, register task information.
-        suspend {
-            self.frame = @frame();
-            self.state = .Staged;
-        }
-
-        // We expect the rest to run on a another thread.
-        return self.runFn(self);
-    }
+pub const Task = struct {
+    runFn: fn (*Task) u32,
 };
 
-// A user define-able task that will be scheduled and executed in regular
-// configurable intervals of time. The init function will be run only once
-// at the beginning of a Task's lifetime. Meanwhile run will contain the actual
-// code that will be scheduled to perform it's functions.
-pub fn Task(
-    comptime TaskContext: type,
-    comptime setupFn: fn (ctx: *TaskContext) anyerror!void,
-    comptime runFn: fn (ctx: *TaskContext) anyerror!void,
-) type {
-    return struct {
-        ctx: TaskContext,
-        schedCtx: Context,
-
-        const Self = @This();
-
-        pub fn init(ctx: TaskContext) Self {
-            return .{
-                .ctx = ctx,
-                .schedCtx = Context.init(run),
-            };
-        }
-
-        pub fn setup(self: *Self) anyerror!void {
-            return setupFn(&self.ctx);
-        }
-
-        fn run(ctx: *Context) anyerror!void {
-            const self = @fieldParentPtr(Self, "schedCtx", ctx);
-            return runFn(&self.ctx);
-        }
-
-        pub fn context(self: *Self) *Context {
-            return &self.schedCtx;
-        }
-    };
-}
+const expect = std.testing.expect;
 
 test "task is created with correct default context" {
-    const MyTaskContext = struct {
+    const BrownieCounter = struct {
         brownies: u8,
+        task: Task,
 
         const Self = @This();
 
-        fn setup(self: *Self) anyerror!void {
-            self.brownies = 5;
+        pub fn init() Self {
+            return .{ .brownies = 5, .task = .{
+                .runFn = taskRun,
+            } };
         }
 
-        fn run(self: *Self) anyerror!void {
+        fn taskRun(task: *Task) u32 {
+            const self = @fieldParentPtr(Self, "task", task);
+            return self.run();
+        }
+
+        fn run(self: *Self) u32 {
             var idx: u32 = 0;
             while (idx < 5) : (idx += 1) {
                 self.brownies += 6;
             }
+            return 50;
         }
     };
-    const MyTask = Task(MyTaskContext, MyTaskContext.setup, MyTaskContext.run);
 
-    var task: MyTask = MyTask.init(.{
-        .brownies = 0,
-    });
-    try task.setup();
-    assert(task.ctx.brownies == 5);
+    var counter = BrownieCounter.init();
+    try expect(counter.brownies == 5);
 
-    const ctx = task.context();
-
-    var result = async ctx.run();
-    try await result;
-    assert(task.ctx.brownies == 35);
+    const ret = counter.run();
+    try expect(counter.brownies == 35);
+    try expect(ret == 50);
 }
