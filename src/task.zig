@@ -7,6 +7,9 @@ pub const State = struct {
 
     // Contains the function frame of the Task.
     frame: anyframe,
+
+    // The next time this task should be scheduled.
+    next: u32,
 };
 
 // Describes the possible states that a Task can be in.
