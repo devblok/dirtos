@@ -6,7 +6,7 @@ const Entry = struct {
     priority: u32,
     context: *task.Context,
 
-    fn sort(ctx: void, a: Entry, b: Entry) bool {
+    fn sort(_: void, a: Entry, b: Entry) bool {
         return a.priority < b.priority;
     }
 };
@@ -17,14 +17,14 @@ pub const Scheduler = struct {
     const Self = @This();
 
     pub fn init(comptime tasks: []Entry) Self {
-        comptime var sorted = sort(Entry, tasks, {}, Entry.sort);
+        comptime sort(Entry, tasks, {}, Entry.sort);
         return .{
-            .tasks = sorted,
+            .tasks = tasks,
         };
     }
 };
 
-usingnamespace std.testing;
+const expect = std.testing.expect;
 
 test "sorts at compile time" {
     const Brownies = struct {
