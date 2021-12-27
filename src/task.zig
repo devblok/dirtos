@@ -1,17 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-// A shared item of contextual information that is useful
-// for a scheduler to interact with and make descitions on.
-pub const State = struct {
-
-    // Contains the function frame of the Task.
-    frame: anyframe,
-
-    // The next time this task should be scheduled.
-    next: u32,
-};
-
 // Describes the possible states that a Task can be in.
 pub const Status = enum {
 
