@@ -27,16 +27,18 @@ pub const Scheduler = struct {
         comptime sort(Entry, tasks, {}, Entry.sort);
 
         var sortedTasks = init: {
-            var initial: [tasks.len]Context = undefined;
+            const static = struct {
+                var initial: [tasks.len]Context = undefined;
+            };
             for (tasks) |t, i| {
-                initial[i] = .{
+                static.initial[i] = .{
                     .ptr = t.ptr,
                     .frame = undefined,
                     .status = .Suspended,
                     .next = 0,
                 };
             }
-            break :init initial;
+            break :init static.initial;
         };
 
         return .{
@@ -188,7 +190,7 @@ test "scheduling cases" {
 
     sched.schedule();
     std.log.info("Status {}.", .{sched.tasks[0].status});
-    try expect(sched.tasks[0].status == .Suspended);
+    try expect(sched.tasks[0].status == .Staged);
     try expect(counter.brownies == 5);
 
     sched.runTask();
