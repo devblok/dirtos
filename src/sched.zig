@@ -1,5 +1,7 @@
 const std = @import("std");
 const sort = std.sort.sort;
+const Atomic = std.atomic.Atomic;
+const Allocator = std.mem.Allocator;
 const Task = @import("task.zig").Task;
 
 pub const Entry = struct {
@@ -11,97 +13,102 @@ pub const Entry = struct {
     }
 };
 
+/// The main scheduler for this OS. It is completely unfair and will always
+/// prefer higher priority tasks to run, if they're ready to.
+/// It also relies on the async mechanism of Zig, meaning that the tasks
+/// must behave and not hog cycles for too long, or else there's a risk of
+/// other tasks not being scheduled in time.
 pub const Scheduler = struct {
     tasks: []Context,
+    async_frames: []@Frame(stageTask),
 
-    // A shared item of contextual information that is useful
-    // for a scheduler to interact with and make descitions on.
+    /// A shared item of contextual information that is useful
+    /// for a scheduler to interact with and make descitions on.
     const Context = struct {
         ptr: *Task,
         frame: anyframe,
-        status: Task.Status,
+        status: Atomic(Task.Status),
         next: u64,
     };
 
-    pub fn init(comptime tasks: []Entry) Scheduler {
+    pub fn init(allocator: *Allocator, comptime tasks: []Entry) !Scheduler {
         comptime sort(Entry, tasks, {}, Entry.sort);
+        var new = try allocator.alloc(Context, tasks.len);
 
-        var sorted_tasks = init: {
-            const static = struct {
-                var initial: [tasks.len]Context = undefined;
+        for (tasks) |task, idx| {
+            new[idx] = .{
+                .ptr = task.ptr,
+                .frame = undefined,
+                .status = Atomic(Task.Status).init(.Suspended),
+                .next = 0,
             };
-            for (tasks) |t, i| {
-                static.initial[i] = .{
-                    .ptr = t.ptr,
-                    .frame = undefined,
-                    .status = .Suspended,
-                    .next = 0,
-                };
-            }
-            break :init static.initial;
-        };
+        }
 
-        return .{
-            .tasks = sorted_tasks[0..],
+        return Scheduler{
+            .tasks = new,
+            .async_frames = try allocator.alloc(@Frame(stageTask), tasks.len),
         };
     }
 
-    // Will schedule next task to run if able. Only one such function
-    // must run at one time. Is designed to run in ISR context.
+    pub fn deinit(self: *Scheduler, allocator: *Allocator) void {
+        allocator.free(self.tasks);
+        allocator.free(self.async_frames);
+    }
+
+    /// Will schedule next task to run if able. Only one such function
+    /// must run at one time. Is designed to run in ISR context.
     pub fn schedule(self: *Scheduler) void {
         if (self.nextTaskWithStatus(.Suspended)) |idx| {
             if (self.isDueToStage(idx)) {
-                _ = async self.stageTask(idx);
+                self.async_frames[idx] = async self.stageTask(idx);
             }
         }
     }
 
-    // Finds the highest priority available tasks to run and runs it until completion.
-    pub fn runTask(self: *Scheduler) void {
+    /// Finds the highest priority available tasks to run and runs it until completion
+    /// or until the task blocks for some reason.
+    pub fn tryRunNextTask(self: *Scheduler) void {
         if (self.nextTaskWithStatus(.Staged)) |idx| {
+            const task = &self.tasks[idx];
 
             // If we manage to set the task into a running state, it's now safe
             // to resume the task on the thread that this method is running on.
             // We return the frame which can be awaited to collect the task result.
-            if (@cmpxchgWeak(
-                Task.Status,
-                &self.tasks[idx].status,
+            if (task.status.tryCompareAndSwap(
                 .Staged,
                 .Running,
-                .Acquire,
+                .Release,
                 .Monotonic,
-            )) |_| {
-                resume self.tasks[idx].frame;
-            }
+            )) |_| {} else resume task.frame;
         }
     }
 
-    // Checks if the task is ready to be scheduled.
+    /// Checks if the task is ready to be scheduled.
     fn isDueToStage(self: *Scheduler, idx: u32) bool {
         return self.tasks[idx].next <= 0; // FIXME: has to check against current time.
     }
 
-    // Prepares and submits the task frame for the hardware threads to execute.
+    /// Prepares and submits the task frame for the hardware threads to execute.
     fn stageTask(self: *Scheduler, idx: u32) void {
+        const task = &self.tasks[idx];
         suspend {
-            self.tasks[idx].frame = @frame();
-            @atomicStore(Task.Status, &self.tasks[idx].status, .Staged, .Release);
+            task.frame = @frame();
+            task.status.store(.Staged, .Release);
         }
-        var task = self.tasks[idx].ptr;
-        self.finalize(idx, task.run());
+        self.finalize(idx, task.ptr.run());
     }
 
-    // Stores the task results and resets status to Suspended.
+    /// Stores the task results and resets status to Suspended.
     fn finalize(self: *Scheduler, idx: u32, result: Task.Result) void {
-        var task = self.tasks[idx];
+        var task = &self.tasks[idx];
         task.next = result.next_time;
-        @atomicStore(Task.Status, &task.status, .Suspended, .Release);
+        task.status.store(.Suspended, .Release);
     }
 
-    // Obtains the index of the next task with given status.
+    /// Obtains the index of the next task with given status.
     fn nextTaskWithStatus(self: *Scheduler, status: Task.Status) ?u32 {
         for (self.tasks) |*ctx, idx| {
-            const loaded = @atomicLoad(Task.Status, &ctx.status, .Acquire);
+            const loaded = ctx.status.load(.Acquire);
             if (loaded == status) {
                 return @intCast(u32, idx);
             }
@@ -112,6 +119,7 @@ pub const Scheduler = struct {
 
 const sched_test = struct {
     const expect = std.testing.expect;
+    var mem_buffer: [2 * 1024]u8 = undefined;
 
     const BrownieCounter = struct {
         brownies: u8,
@@ -140,7 +148,7 @@ const sched_test = struct {
     };
 };
 
-test "sorts at compile time" {
+test "sorts tasks internally" {
     comptime var counter1 = sched_test.BrownieCounter.init(5);
     comptime var counter2 = sched_test.BrownieCounter.init(8);
 
@@ -149,28 +157,38 @@ test "sorts at compile time" {
         .{ .priority = 0, .ptr = &counter2.task },
     };
 
-    const sched = Scheduler.init(tasks[0..]);
+    var fixed_allocator = std.heap.FixedBufferAllocator.init(sched_test.mem_buffer[0..]);
+    var sched = try Scheduler.init(&fixed_allocator.allocator(), tasks[0..]);
+    defer sched.deinit(&fixed_allocator.allocator());
 
     try sched_test.expect(sched.tasks[0].ptr == &counter2.task);
     try sched_test.expect(sched.tasks[1].ptr == &counter1.task);
 }
 
 test "scheduling cases" {
-    comptime var counter = sched_test.BrownieCounter.init(5);
-    comptime var tasks = [_]Entry{
-        .{ .priority = 12, .ptr = &counter.task },
+    const g = struct {
+        var counter = sched_test.BrownieCounter.init(5);
+        var tasks = [_]Entry{
+            .{ .priority = 12, .ptr = &counter.task },
+        };
     };
 
-    var sched = Scheduler.init(tasks[0..]);
-    try sched_test.expect(sched.tasks[0].status == .Suspended);
+    var fixed_allocator = std.heap.FixedBufferAllocator.init(sched_test.mem_buffer[0..]).allocator();
 
+    var sched = try Scheduler.init(&fixed_allocator, g.tasks[0..]);
+    defer sched.deinit(&fixed_allocator);
+
+    // Scheduler starts with all tasks in suspended states.
+    try sched_test.expect(sched.tasks[0].status.load(.Acquire) == .Suspended);
+
+    // We test that task gets staged and prepared to run.
     sched.schedule();
-    std.log.info("Status {}.", .{sched.tasks[0].status});
-    try sched_test.expect(sched.tasks[0].status == .Staged);
-    try sched_test.expect(counter.brownies == 5);
+    try sched_test.expect(sched.tasks[0].status.load(.Acquire) == .Staged);
+    try sched_test.expect(g.counter.brownies == 5);
 
-    sched.runTask();
-    try sched_test.expect(sched.tasks[0].status == .Suspended);
+    // Task must run until completion and get suspended.
+    sched.tryRunNextTask();
+    try sched_test.expect(sched.tasks[0].status.load(.Acquire) == .Suspended);
     try sched_test.expect(sched.tasks[0].next == 85);
-    try sched_test.expect(counter.brownies == 35);
+    try sched_test.expect(g.counter.brownies == 35);
 }

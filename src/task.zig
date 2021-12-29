@@ -1,27 +1,28 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+/// The model of how task is represented for this OS.
 pub const Task = struct {
     runFn: fn (*Task) Result,
 
-    // Describes the possible states that a Task can be in.
-    pub const Status = enum {
+    /// Describes the possible states that a Task can be in.
+    pub const Status = enum(u32) {
 
-        // Task has been completed, waiting for next iteration.
-        // This is also the initial state of any task.
+        /// Task has been completed, waiting for next iteration.
+        /// This is also the initial state of any task.
         Suspended,
 
-        // Task is ready to execute on a thread.
+        /// Task is ready to execute on a thread.
         Staged,
 
-        // Task is currently executing on some thread.
+        /// Task is currently executing on some thread.
         Running,
 
-        // Task is waiting for some precondition to resolve.
+        /// Task is waiting for some precondition to resolve.
         Blocked,
     };
 
-    // Contains the result of task execution.
+    /// Contains the result of task execution.
     pub const Result = struct {
         next_time: u64,
     };
