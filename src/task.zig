@@ -23,7 +23,7 @@ pub const Task = struct {
 
     // Contains the result of task execution.
     pub const Result = struct {
-        nextTime: u64,
+        next_time: u64,
     };
 
     pub fn run(self: *Task) Result {
@@ -56,7 +56,7 @@ test "task is created with correct default context" {
             while (idx < 5) : (idx += 1) {
                 self.brownies += 6;
             }
-            return .{ .nextTime = 50 };
+            return .{ .next_time = 50 };
         }
     };
 
@@ -65,5 +65,5 @@ test "task is created with correct default context" {
 
     const ret = counter.run();
     try expect(counter.brownies == 35);
-    try expect(ret.nextTime == 50);
+    try expect(ret.next_time == 50);
 }

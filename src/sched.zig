@@ -26,7 +26,7 @@ pub const Scheduler = struct {
     pub fn init(comptime tasks: []Entry) Scheduler {
         comptime sort(Entry, tasks, {}, Entry.sort);
 
-        var sortedTasks = init: {
+        var sorted_tasks = init: {
             const static = struct {
                 var initial: [tasks.len]Context = undefined;
             };
@@ -42,7 +42,7 @@ pub const Scheduler = struct {
         };
 
         return .{
-            .tasks = sortedTasks[0..],
+            .tasks = sorted_tasks[0..],
         };
     }
 
@@ -94,7 +94,7 @@ pub const Scheduler = struct {
     // Stores the task results and resets status to Suspended.
     fn finalize(self: *Scheduler, idx: u32, result: Task.Result) void {
         var task = self.tasks[idx];
-        task.next = result.nextTime;
+        task.next = result.next_time;
         @atomicStore(Task.Status, &task.status, .Suspended, .Release);
     }
 
@@ -110,9 +110,9 @@ pub const Scheduler = struct {
     }
 };
 
-const expect = std.testing.expect;
+const sched_test = struct {
+    const expect = std.testing.expect;
 
-test "sorts at compile time" {
     const BrownieCounter = struct {
         brownies: u8,
         task: Task,
@@ -135,12 +135,14 @@ test "sorts at compile time" {
             while (idx < 5) : (idx += 1) {
                 self.brownies += 6;
             }
-            return .{ .nextTime = 50 + self.brownies };
+            return .{ .next_time = 50 + self.brownies };
         }
     };
+};
 
-    comptime var counter1 = BrownieCounter.init(5);
-    comptime var counter2 = BrownieCounter.init(8);
+test "sorts at compile time" {
+    comptime var counter1 = sched_test.BrownieCounter.init(5);
+    comptime var counter2 = sched_test.BrownieCounter.init(8);
 
     comptime var tasks = [_]Entry{
         .{ .priority = 12, .ptr = &counter1.task },
@@ -149,52 +151,26 @@ test "sorts at compile time" {
 
     const sched = Scheduler.init(tasks[0..]);
 
-    try expect(sched.tasks[0].ptr == &counter2.task);
-    try expect(sched.tasks[1].ptr == &counter1.task);
+    try sched_test.expect(sched.tasks[0].ptr == &counter2.task);
+    try sched_test.expect(sched.tasks[1].ptr == &counter1.task);
 }
 
 test "scheduling cases" {
-    const BrownieCounter = struct {
-        brownies: u8,
-        task: Task,
-
-        const Self = @This();
-
-        pub fn init(start: u8) Self {
-            return .{ .brownies = start, .task = .{
-                .runFn = taskRun,
-            } };
-        }
-
-        fn taskRun(t: *Task) Task.Result {
-            const self = @fieldParentPtr(Self, "task", t);
-            return self.run();
-        }
-
-        fn run(self: *Self) Task.Result {
-            var idx: u32 = 0;
-            while (idx < 5) : (idx += 1) {
-                self.brownies += 6;
-            }
-            return .{ .nextTime = 50 + self.brownies };
-        }
-    };
-
-    comptime var counter = BrownieCounter.init(5);
+    comptime var counter = sched_test.BrownieCounter.init(5);
     comptime var tasks = [_]Entry{
         .{ .priority = 12, .ptr = &counter.task },
     };
 
     var sched = Scheduler.init(tasks[0..]);
-    try expect(sched.tasks[0].status == .Suspended);
+    try sched_test.expect(sched.tasks[0].status == .Suspended);
 
     sched.schedule();
     std.log.info("Status {}.", .{sched.tasks[0].status});
-    try expect(sched.tasks[0].status == .Staged);
-    try expect(counter.brownies == 5);
+    try sched_test.expect(sched.tasks[0].status == .Staged);
+    try sched_test.expect(counter.brownies == 5);
 
     sched.runTask();
-    try expect(sched.tasks[0].status == .Suspended);
-    try expect(sched.tasks[0].next == 85);
-    try expect(counter.brownies == 35);
+    try sched_test.expect(sched.tasks[0].status == .Suspended);
+    try sched_test.expect(sched.tasks[0].next == 85);
+    try sched_test.expect(counter.brownies == 35);
 }
