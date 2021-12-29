@@ -34,7 +34,7 @@ pub const Task = struct {
 
 const expect = std.testing.expect;
 
-test "task is created with correct default context" {
+test "task" {
     const BrownieCounter = struct {
         brownies: u8,
         task: Task,

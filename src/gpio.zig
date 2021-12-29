@@ -1,5 +1,5 @@
 const cpu = @import("./cpu.zig");
-const arch = @import("./arch/arch.zig");
+const arch = @import("./arch/base.zig");
 
 /// Describes a hardware pin.
 pub const Pin = struct {
