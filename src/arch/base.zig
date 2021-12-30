@@ -1,21 +1,11 @@
 const builtin = @import("builtin");
-const arch = switch (builtin.target.cpu) {
-    .riscv => @import("./riscv.zig"),
+const Allocator = @import("std").mem.Allocator;
+
+const arch = switch (builtin.target.cpu.arch) {
+    .riscv32 => @import("./riscv.zig"),
     else => @compileError("unsupported"),
 };
 
-pub const page_allocator = if (builtin.target.isWasm())
-    Allocator{
-        .ptr = undefined,
-        .vtable = &WasmPageAllocator.vtable,
-    }
-else if (builtin.target.os.tag == .freestanding)
-    root.os.heap.page_allocator
-else
-    Allocator{
-        .ptr = undefined,
-        .vtable = &PageAllocator.vtable,
-    };
 /// Puts cpu to sleep for given number of CPU cycles.
 pub fn sleep(loops: u32) void {
     @call(.{ .modifier = .never_inline }, arch.sleep, .{loops});

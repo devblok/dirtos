@@ -74,11 +74,11 @@ pub const Scheduler = struct {
             // If we manage to set the task into a running state, it's now safe
             // to resume the task on the thread that this method is running on.
             // We return the frame which can be awaited to collect the task result.
-            if (task.status.tryCompareAndSwap(
+            if (task.status.compareAndSwap(
                 .Staged,
                 .Running,
-                .Release,
-                .Monotonic,
+                .AcqRel,
+                .Acquire,
             )) |_| {} else resume task.frame;
         }
     }

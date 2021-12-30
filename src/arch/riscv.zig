@@ -133,7 +133,8 @@ pub fn togglePin(n: u5) void {
     reg.output = reg.output ^ @as(u32, 1) << n;
 }
 
-pub fn sleep(loops: u32) linksection(".fast") void {
+// TODO: linksection(".fast")
+pub fn sleep(loops: u32) void {
     var idx: u32 = 0;
     while (idx < loops) : (idx += 1) {
         asm volatile ("nop");

@@ -1,4 +1,3 @@
-const cpu = @import("./cpu.zig");
 const arch = @import("./arch/base.zig");
 
 /// Describes a hardware pin.

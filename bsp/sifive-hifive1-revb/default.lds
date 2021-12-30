@@ -9,15 +9,12 @@ MEMORY
     rom  (rx)   : ORIGIN = 0x20010000, LENGTH = 0x6a120
 }
 
-PHDRS
+PHDRS 
 {
-    rom PT_LOAD;
-    ram PT_LOAD;
-    text PT_LOAD;
     init PT_LOAD;
+    text PT_LOAD;
     fast PT_LOAD;
-    itim_init PT_LOAD;
-    ram_init PT_LOAD;
+    data PT_LOAD;
 }
 
 STACK_SIZE = 0x200;
@@ -63,7 +60,7 @@ SECTIONS
     {
         KEEP(*(.init.start))
         KEEP(*(.init*))
-    } > rom
+    } > rom : init
 
     .text :
     {
@@ -71,7 +68,7 @@ SECTIONS
         *(.text*)
         *(.rodata*)
         _etext = .;
-    } > rom
+    } > rom : text
 
     /* ITIM (hot code) memory section */
     .fast :
@@ -81,7 +78,7 @@ SECTIONS
         *(.fast .fast.*);
         . = ALIGN(8);
         _efast = .;
-    } > itim AT > rom : itim_init
+    } > itim AT > rom : fast
     
     .bss (NOLOAD) :
     {
@@ -99,7 +96,7 @@ SECTIONS
         PROVIDE( _sp = . );
         . = ALIGN(16);
         _stack_end = .;
-    } > ram : ram
+    } > ram
 
     .isrstack (NOLOAD) :
     {
@@ -109,7 +106,7 @@ SECTIONS
         PROVIDE( _isr_sp = . );
         . = ALIGN(16);
         _isr_stack_end = .;
-    } > ram : ram
+    } > ram
 
     .data :
     {
@@ -120,7 +117,7 @@ SECTIONS
         PROVIDE( __global_pointer$ = . + 0x800 );
         *(.sdata .sdata.* .sdata2.*)
         _edata = .;
-    } > ram AT > rom : ram_init
+    } > ram AT > rom : data
 
     _end = .;
 

@@ -5,16 +5,7 @@
 
 .global _isr
 _isr:
-
-    /*li t0, 0xFFFFFFFF
-    la t1, _gpio_out_en
-    sw t0, 0(t1)*/
-
-    /*li t0, 0xFFFFFFFF
-    la t1, _gpio_out_val
-    sw t0, 0(t1)*/
-
-
+    
     csrw mscratch, sp
     la sp, _isr_sp
 
