@@ -8,8 +8,8 @@ const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 
 const global = struct {
     var fast_buffer: [256]u8 linksection(".fast") = undefined;
-    var allocator: FixedBufferAllocator = undefined;
-    var scheduler: scheduling.Scheduler = undefined;
+    var allocator: FixedBufferAllocator linksection(".fast") = undefined;
+    var scheduler: scheduling.Scheduler linksection(".fast") = undefined;
 };
 
 pub fn initialize(comptime tasks: []scheduling.Entry) !*scheduling.Scheduler {

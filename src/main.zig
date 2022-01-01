@@ -46,6 +46,7 @@ comptime {
 }
 
 fn start() callconv(.C) noreturn {
+    arch.sleep(20000);
     var scheduler = dirtos.initialize(&task_list) catch errorState();
     main(scheduler) catch errorState();
     unreachable;
