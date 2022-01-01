@@ -1,3 +1,5 @@
+const mem = @import("std").mem;
+
 extern var _periph_gpio_start: u32;
 extern var _periph_gpio_end: u32;
 
@@ -11,6 +13,11 @@ extern var _periph_uart_0_start: u32;
 extern var _periph_uart_1_start: u32;
 
 extern var _prci_start: u32;
+
+extern var __itim_source_start: u32;
+extern var __itim_target_start: u32;
+extern var __itim_target_end: u32;
+extern var __itim_target_size: u32;
 
 const UartInst = extern struct {
     tx_data: u32,
@@ -53,6 +60,17 @@ const PlicPriorityMap = extern struct {
     pwm_2_pri: [4]u32,
     i2c_pri: u32,
 };
+
+pub fn init() void {
+    // TODO: Allocate the entire .fast segment into ITIM.
+
+    const size = @ptrToInt(@ptrCast(*u32, &__itim_target_size));
+    var dest = @ptrCast([*]u8, &__itim_target_start);
+    var source = @ptrCast([*]u8, &__itim_source_start);
+
+    @fence(.Acquire);
+    mem.copy(u8, dest[0..size], source[0..size]);
+}
 
 pub fn gpioPinOutput(pin: u5, enable: bool) void {
     const reg = @ptrCast(*GpioInst, &_periph_gpio_start);

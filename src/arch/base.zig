@@ -6,6 +6,10 @@ const arch = switch (builtin.target.cpu.arch) {
     else => @compileError("unsupported"),
 };
 
+pub fn init() void {
+    arch.init();
+}
+
 /// Puts cpu to sleep for given number of CPU cycles.
 pub fn sleep(loops: u32) void {
     @call(.{ .modifier = .never_inline }, arch.sleep, .{loops});

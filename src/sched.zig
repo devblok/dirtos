@@ -57,7 +57,7 @@ pub const Scheduler = struct {
 
     /// Will schedule next task to run if able. Only one such function
     /// must run at one time. Is designed to run in ISR context.
-    pub fn schedule(self: *Scheduler) void {
+    pub fn schedule(self: *Scheduler) linksection(".fast") void {
         if (self.nextTaskWithStatus(.Suspended)) |idx| {
             if (self.isDueToStage(idx)) {
                 self.async_frames[idx] = async self.stageTask(idx);
@@ -67,7 +67,7 @@ pub const Scheduler = struct {
 
     /// Finds the highest priority available tasks to run and runs it until completion
     /// or until the task blocks for some reason.
-    pub fn tryRunNextTask(self: *Scheduler) void {
+    pub fn tryRunNextTask(self: *Scheduler) linksection(".fast") void {
         if (self.nextTaskWithStatus(.Staged)) |idx| {
             const task = &self.tasks[idx];
 
@@ -84,12 +84,12 @@ pub const Scheduler = struct {
     }
 
     /// Checks if the task is ready to be scheduled.
-    fn isDueToStage(self: *Scheduler, idx: u32) bool {
+    fn isDueToStage(self: *Scheduler, idx: u32) linksection(".fast") bool {
         return self.tasks[idx].next <= 0; // FIXME: has to check against current time.
     }
 
     /// Prepares and submits the task frame for the hardware threads to execute.
-    fn stageTask(self: *Scheduler, idx: u32) void {
+    fn stageTask(self: *Scheduler, idx: u32) linksection(".fast") void {
         const task = &self.tasks[idx];
         suspend {
             task.frame = @frame();
@@ -99,14 +99,14 @@ pub const Scheduler = struct {
     }
 
     /// Stores the task results and resets status to Suspended.
-    fn finalize(self: *Scheduler, idx: u32, result: Task.Result) void {
+    fn finalize(self: *Scheduler, idx: u32, result: Task.Result) linksection(".fast") void {
         var task = &self.tasks[idx];
         task.next = result.next_time;
         task.status.store(.Suspended, .Release);
     }
 
     /// Obtains the index of the next task with given status.
-    fn nextTaskWithStatus(self: *Scheduler, status: Task.Status) ?u32 {
+    fn nextTaskWithStatus(self: *Scheduler, status: Task.Status) linksection(".fast") ?u32 {
         for (self.tasks) |*ctx, idx| {
             const loaded = ctx.status.load(.Acquire);
             if (loaded == status) {

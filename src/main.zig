@@ -1,9 +1,8 @@
-const FixedBufferAllocator = @import("std").heap.FixedBufferAllocator;
 const Pin = @import("gpio.zig").Pin;
 const Task = @import("task.zig").Task;
-const sched = @import("sched.zig");
-const riscv = @import("arch/riscv.zig");
+const scheduling = @import("sched.zig");
 const arch = @import("arch/base.zig");
+const dirtos = @import("dirtos.zig");
 
 const Blink = struct {
     task: Task,
@@ -37,15 +36,9 @@ const Blink = struct {
     }
 };
 
-// TODO: Some of this stuff needs to be hidden from the user.
-// It's not straightforward to set up the chip + it needs to
-// be platform specific.
-const global = struct {
-    var heap_buffer: [512]u8 = undefined;
-    var blink_task = Blink.init(19);
-    var task_list = [_]sched.Entry{
-        .{ .priority = 0, .ptr = &blink_task.task },
-    };
+var blink_task = Blink.init(19);
+var task_list = [_]scheduling.Entry{
+    .{ .priority = 0, .ptr = &blink_task.task },
 };
 
 comptime {
@@ -53,27 +46,12 @@ comptime {
 }
 
 fn start() callconv(.C) noreturn {
-    riscv.disablePLIC();
-    // arch.enableInterrupts();
-    arch.plicIrqMask(0);
-
-    main() catch {
-        errorState();
-    };
-
+    var scheduler = dirtos.initialize(&task_list) catch errorState();
+    main(scheduler) catch errorState();
     unreachable;
 }
 
-fn main() !void {
-    arch.sleep(1000000);
-
-    var fixed_alloc = FixedBufferAllocator.init(&global.heap_buffer);
-    var scheduler = try sched.Scheduler.init(
-        &fixed_alloc.allocator(),
-        global.task_list[0..],
-    );
-    defer scheduler.deinit(global.allocator.allocator());
-
+fn main(scheduler: *scheduling.Scheduler) !void {
     while (true) {
         scheduler.schedule();
         scheduler.tryRunNextTask();

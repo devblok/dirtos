@@ -79,6 +79,11 @@ SECTIONS
         . = ALIGN(8);
         _efast = .;
     } > itim AT > rom : fast
+
+    PROVIDE( __itim_source_start = LOADADDR(.fast) );
+    PROVIDE( __itim_target_start = ADDR(.fast) );
+    PROVIDE( __itim_target_end = ADDR(.fast) + SIZEOF(.fast) );
+    PROVIDE( __itim_target_size = SIZEOF(.fast) );
     
     .bss (NOLOAD) :
     {
