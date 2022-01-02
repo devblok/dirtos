@@ -5,22 +5,16 @@ const Atomic = std.atomic.Atomic;
 const Allocator = std.mem.Allocator;
 const Task = @import("task.zig").Task;
 
-pub const Entry = struct {
-    priority: u8,
-    ptr: *Task,
-
-    fn sort(_: void, a: Entry, b: Entry) bool {
-        return a.priority < b.priority;
-    }
-};
-
 /// The main scheduler for this OS. It is completely unfair and will always
 /// prefer higher priority tasks to run, if they're ready to.
 /// It also relies on the async mechanism of Zig, meaning that the tasks
 /// must behave and not hog cycles for too long, or else there's a risk of
 /// other tasks not being scheduled in time.
+///
+/// Tasks are given at compile time in decreasing order of priority.
 pub fn Scheduler(
     comptime num_tasks: usize,
+    comptime use_lr_sc: bool, // Some MCUs cannot do atomic compare and swap.
 ) type {
     return struct {
         tasks: [num_tasks]Context = undefined,
@@ -37,20 +31,15 @@ pub fn Scheduler(
             next: u64,
         };
 
-        pub fn init(comptime entries: []Entry) Self {
-            assert(entries.len == num_tasks);
-
-            comptime sort(Entry, entries, {}, Entry.sort);
-            var self: Self = .{};
-            for (self.tasks) |*task, idx| {
-                task.* = .{
-                    .ptr = entries[idx].ptr,
+        pub fn init(self: *Self, entries: [num_tasks]*Task) void {
+            for (self.tasks) |*t, i| {
+                t.* = .{
+                    .ptr = entries[i],
                     .frame = undefined,
                     .status = Atomic(Task.Status).init(.Suspended),
                     .next = 0,
                 };
             }
-            return self;
         }
 
         /// Will schedule next task to run if able. Only one such function
@@ -72,12 +61,24 @@ pub fn Scheduler(
                 // If we manage to set the task into a running state, it's now safe
                 // to resume the task on the thread that this method is running on.
                 // We return the frame which can be awaited to collect the task result.
-                if (task.status.compareAndSwap(
-                    .Staged,
-                    .Running,
-                    .AcqRel,
-                    .Acquire,
-                )) |_| {} else resume task.frame;
+                var run = false;
+
+                if (use_lr_sc) {
+                    if (task.status.compareAndSwap(
+                        .Staged,
+                        .Running,
+                        .AcqRel,
+                        .Acquire,
+                    )) |_| {} else run = true;
+                } else {
+                    const status = task.status.load(.Acquire);
+                    if (status == .Staged) {
+                        task.status.store(.Running, .Release);
+                        run = true;
+                    }
+                }
+
+                if (run) resume task.frame;
             }
         }
 
@@ -146,29 +147,30 @@ const sched_test = struct {
     };
 };
 
-test "sorts tasks internally" {
-    comptime var counter1 = sched_test.BrownieCounter.init(5);
-    comptime var counter2 = sched_test.BrownieCounter.init(8);
-
-    comptime var tasks = [_]Entry{
-        .{ .priority = 12, .ptr = &counter1.task },
-        .{ .priority = 0, .ptr = &counter2.task },
-    };
-
-    var sched = Scheduler(tasks.len).init(&tasks);
-    try sched_test.expect(sched.tasks[0].ptr == &counter2.task);
-    try sched_test.expect(sched.tasks[1].ptr == &counter1.task);
-}
+// test "sorts tasks internally" {
+//     comptime var counter1 = sched_test.BrownieCounter.init(5);
+//     comptime var counter2 = sched_test.BrownieCounter.init(8);
+//
+//     const tasks = [_]*Task{
+//         &counter1.task,
+//         &counter2.task,
+//     };
+//
+//     var sched: Scheduler(tasks.len, tasks, false) = .{};
+//     try sched_test.expect(sched.tasks[0].ptr == &counter2.task);
+//     try sched_test.expect(sched.tasks[1].ptr == &counter1.task);
+// }
 
 test "scheduling cases" {
     const g = struct {
         var counter = sched_test.BrownieCounter.init(5);
-        var tasks = [_]Entry{
-            .{ .priority = 12, .ptr = &counter.task },
+        const tasks = [_]*Task{
+            &counter.task,
         };
     };
 
-    var sched = Scheduler(g.tasks.len).init(&g.tasks);
+    var sched: Scheduler(g.tasks.len, true) = .{};
+    sched.init(g.tasks);
 
     // Scheduler starts with all tasks in suspended states.
     try sched_test.expect(sched.tasks[0].status.load(.Acquire) == .Suspended);

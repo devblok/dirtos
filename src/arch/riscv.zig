@@ -1,7 +1,7 @@
 const mem = @import("std").mem;
 
 pub const config = struct {
-    var multicore = false;
+    pub const multicore = false;
 };
 
 extern var _periph_gpio_start: u32;

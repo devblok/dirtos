@@ -27,18 +27,14 @@ const Blink = struct {
     fn run(self: *Blink) u64 {
         if (!self.did_init) {
             self.pin = Pin.init(self.pin_no, .{ .mode = .DigitalOutput });
+            self.did_init = true;
         } else {
             self.pin.toggle();
-            arch.sleep(20000); // For now delay only.
+            arch.sleep(100000); // For now delay only.
         }
 
         return 0; // TODO: Must be current time + next toggle.
     }
-};
-
-var blink_task = Blink.init(19);
-var task_list = [_]scheduling.Entry{
-    .{ .priority = 0, .ptr = &blink_task.task },
 };
 
 comptime {
@@ -47,12 +43,16 @@ comptime {
 
 fn start() callconv(.C) noreturn {
     arch.sleep(20000);
-    var scheduler = dirtos.initialize(&task_list) catch errorState();
-    main(scheduler) catch errorState();
+    main() catch errorState();
     unreachable;
 }
 
-fn main(scheduler: *scheduling.Scheduler) !void {
+fn main() !void {
+    var blink_task = Blink.init(19);
+    const task_list = [_]*Task{
+        &blink_task.task,
+    };
+    var scheduler = dirtos.initialize(task_list.len, task_list);
     while (true) {
         scheduler.schedule();
         scheduler.tryRunNextTask();
