@@ -1,5 +1,9 @@
 const mem = @import("std").mem;
 
+pub const config = struct {
+    var multicore = false;
+};
+
 extern var _periph_gpio_start: u32;
 extern var _periph_gpio_end: u32;
 
@@ -70,6 +74,14 @@ pub fn init() void {
 
     @fence(.Acquire);
     mem.copy(u8, dest[0..size], source[0..size]);
+}
+
+pub fn wait() void {
+    wfi();
+}
+
+fn wfi() void {
+    asm volatile ("wfi");
 }
 
 pub fn gpioPinOutput(pin: u5, enable: bool) void {
@@ -191,7 +203,7 @@ pub fn enableInterrupts() void {
     _ = asm volatile (
         \\ csrw mie, a0
         :
-        : [val] "{a0}" (val),
+        : [val] "{a0}" (val)
         : "memory", "a0"
     );
 }
