@@ -54,8 +54,8 @@ fn main() !void {
     };
     var scheduler = dirtos.initialize(task_list.len, task_list);
     while (true) {
-        scheduler.schedule();
         scheduler.tryRunNextTask();
+        // TODO: When ready, use WFI instruction to wait for timer interrupt.
     }
 }
 

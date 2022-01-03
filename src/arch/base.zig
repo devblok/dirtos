@@ -21,6 +21,9 @@ pub const enableInterrupts = arch.enableInterrupts;
 // TODO: Remove reliance on RISC-V.
 pub const plicIrqMask = arch.plicIrqMask;
 
+/// Function to obtain the current operating frequency.
+pub const operatingFrequency = arch.operatingFrequency;
+
 // GPIO setting functions.
 pub const gpioPinInput = arch.gpioPinInput;
 pub const gpioPinOutput = arch.gpioPinOutput;
@@ -28,7 +31,7 @@ pub const setGpioPlicPriority = arch.setGpioPlicPriority;
 pub const gpioPinRiseIrq = arch.gpioPinRiseIrq;
 pub const gpioPinRead = arch.gpioPinRead;
 pub const gpioPinToggle = arch.gpioPinToggle;
-pub const GpioVector = arch.GpioVector;
+pub const Vector = arch.Vector;
 
 // UART functions.
 pub const UartError = arch.UartError;

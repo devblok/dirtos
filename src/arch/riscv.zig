@@ -1,7 +1,46 @@
-const mem = @import("std").mem;
+const std = @import("std");
+const mem = std.mem;
+const Atomic = std.atomic.Atomic;
 
 pub const config = struct {
     pub const multicore = false;
+};
+
+const aon_map = struct {
+    extern var _aon_domain_start: u32;
+    extern var _aon_domain_end: u32;
+    extern var _aon_domain_wdogcfg: u32;
+    extern var _aon_domain_wdogcount: u32;
+    extern var _aon_domain_wdogs: u32;
+    extern var _aon_domain_wdogfeed: u32;
+    extern var _aon_domain_wdogkey: u32;
+    extern var _aon_domain_wdogcmp0: u32;
+    extern var _aon_domain_rtccfg: u32;
+    extern var _aon_domain_rtccountlo: u32;
+    extern var _aon_domain_rtccounthi: u32;
+    extern var _aon_domain_rtcs: u32;
+    extern var _aon_domain_rtccmp0: u32;
+    extern var _aon_domain_lfrosccfg: u32;
+    extern var _aon_domain_lfclkmux: u32;
+    extern var _aon_domain_backup_start: u32;
+    extern var _aon_domain_backup_count: u32;
+    extern var _aon_domain_pmuwakeup_start: u32;
+    extern var _aon_domain_pmuwakeup_count: u32;
+    extern var _aon_domain_pmusleep_start: u32;
+    extern var _aon_domain_pmusleep_count: u32;
+    extern var _aon_domain_pmuie: u32;
+    extern var _aon_domain_pmucause: u32;
+    extern var _aon_domain_pmusleep: u32;
+    extern var _aon_domain_pmukey: u32;
+    extern var _aon_domain_SiFiveBandgap: u32;
+    extern var _aon_domain_aoncfg: u32;
+};
+
+const clint_map = struct {
+    extern var _clint_start: u32;
+    extern var _clint_hart0_msip: u32;
+    extern var _clint_hart0_mtimecmp: u64;
+    extern var _clint_hart0_mtime: u64;
 };
 
 extern var _periph_gpio_start: u32;
@@ -34,21 +73,21 @@ const UartInst = extern struct {
 };
 
 const GpioInst = extern struct {
-    input: u32,
-    in_enable: u32,
-    out_enable: u32,
-    output: u32,
-    pull_up_enable: u32,
-    drive_strength: u32,
-    rise_irq_enable: u32,
-    rise_irq_pending: u32,
-    fall_irq_enable: u32,
-    fall_irq_pending: u32,
-    high_irq_enable: u32,
-    high_irq_pending: u32,
-    low_irq_enable: u32,
-    low_irq_pending: u32,
-    output_xor: u32,
+    input: Atomic(u32),
+    in_enable: Atomic(u32),
+    out_enable: Atomic(u32),
+    output: Atomic(u32),
+    pull_up_enable: Atomic(u32),
+    drive_strength: Atomic(u32),
+    rise_irq_enable: Atomic(u32),
+    rise_irq_pending: Atomic(u32),
+    fall_irq_enable: Atomic(u32),
+    fall_irq_pending: Atomic(u32),
+    high_irq_enable: Atomic(u32),
+    high_irq_pending: Atomic(u32),
+    low_irq_enable: Atomic(u32),
+    low_irq_pending: Atomic(u32),
+    output_xor: Atomic(u32),
 };
 
 /// Platform level interrupt controller priotity map.
@@ -66,8 +105,6 @@ const PlicPriorityMap = extern struct {
 };
 
 pub fn init() void {
-    // TODO: Allocate the entire .fast segment into ITIM.
-
     const size = @ptrToInt(@ptrCast(*u32, &__itim_target_size));
     var dest = @ptrCast([*]u8, &__itim_target_start);
     var source = @ptrCast([*]u8, &__itim_source_start);
@@ -76,9 +113,7 @@ pub fn init() void {
     mem.copy(u8, dest[0..size], source[0..size]);
 }
 
-pub fn wait() void {
-    wfi();
-}
+pub const wait = wfi();
 
 fn wfi() void {
     asm volatile ("wfi");
@@ -88,39 +123,38 @@ pub fn gpioPinOutput(pin: u5, enable: bool) void {
     const reg = @ptrCast(*GpioInst, &_periph_gpio_start);
 
     if (enable) {
-        _ = @atomicRmw(u32, &reg.out_enable, .Or, @as(u32, 1) << pin, .Acquire);
+        _ = reg.out_enable.bitSet(pin, .Acquire);
     } else {
-        _ = @atomicRmw(u32, &reg.out_enable, .Xor, @as(u32, 1) << pin, .Acquire);
+        _ = reg.out_enable.bitReset(pin, .Acquire);
     }
 }
 
 pub fn gpioPinInput(pin: u5, enable: bool) void {
     const reg = @ptrCast(*GpioInst, &_periph_gpio_start);
-
     if (enable) {
-        _ = @atomicRmw(u32, &reg.in_enable, .Or, @as(u32, 1) << pin, .Acquire);
+        _ = reg.in_enable.bitSet(pin, .Acquire);
     } else {
-        _ = @atomicRmw(u32, &reg.in_enable, .Xor, @as(u32, 1) << pin, .Acquire);
+        _ = reg.in_enable.bitReset(pin, .Acquire);
     }
 }
 
-pub fn gpioPinRiseIrq(pin: u5, irq: ?*GpioVector) void {
+pub fn gpioPinRiseIrq(pin: u5, irq: ?*Vector) void {
     const reg = @ptrCast(*GpioInst, &_periph_gpio_start);
 
     if (irq) |vec| {
         gpioVectorTable[pin] = vec;
-        _ = @atomicRmw(u32, &reg.rise_irq_enable, .Or, @as(u32, 1) << pin, .Acquire);
+        _ = reg.rise_irq_enable.bitSet(pin, .Acquire);
         plicIrqReg(pin + 8, true);
     } else {
         gpioVectorTable[pin] = null;
-        _ = @atomicRmw(u32, &reg.rise_irq_enable, .Xor, @as(u32, 1) << pin, .Acquire);
+        _ = reg.rise_irq_enable.bitReset(pin, .Acquire);
         plicIrqReg(pin + 8, false);
     }
 }
 
 pub fn gpioPinToggle(pin: u5) void {
     var reg = @ptrCast(*GpioInst, &_periph_gpio_start);
-    _ = @atomicRmw(u32, &reg.output, .Xor, @as(u32, 1) << pin, .Acquire);
+    _ = reg.output.bitToggle(pin, .Acquire);
 }
 
 pub fn gpioPinRead(pin: u5) bool {
@@ -148,6 +182,11 @@ pub fn setGpioPlicPriority(pin: u5, priority: u32) void {
     @atomicStore(u32, &prio_map.gpio_pri[pin], priority, .Release);
 }
 
+pub fn setRtcPlicPriority(priority: u32) void {
+    var prio_map = @ptrCast(*PlicPriorityMap, &_periph_plic_priority_start);
+    @atomicStore(u32, &prio_map.aon_rtc_pri, priority, .Release);
+}
+
 pub fn disablePLIC() void {
     const size = comptime @sizeOf(PlicPriorityMap);
     const prio_map = @ptrCast(*[size]u32, &_periph_plic_priority_start);
@@ -158,17 +197,49 @@ pub fn disablePLIC() void {
     }
 }
 
-pub fn togglePin(n: u5) void {
-    var reg = @ptrCast(*GpioInst, &_periph_gpio_start);
-    reg.output = reg.output ^ @as(u32, 1) << n;
-}
-
-// TODO: linksection(".fast")
 pub fn sleep(loops: u32) void {
     var idx: u32 = 0;
     while (idx < loops) : (idx += 1) {
         asm volatile ("nop");
     }
+}
+
+pub fn clintGetCycleCount(hart: u32) u64 {
+    const mtime = @ptrCast([*]volatile u64, &clint_map._clint_hart0_mtime);
+    return mtime[hart];
+}
+
+pub fn clintSetTimeCmp(hart: u32, cycles: u64) void {
+    const mtimecmp = @ptrCast([*]volatile u64, &clint_map._clint_hart0_mtimecmp);
+    mtimecmp[hart] = cycles;
+}
+
+pub fn clintSetTimerIrq(vec: *Vector) void {
+    clintTimerVector = vec;
+}
+
+pub fn rtcConfigure(scale: u3, continious: bool, irq_on: bool) void {
+    const aon = @ptrCast(*Atomic(u32), &aon_map._aon_domain_rtccfg);
+
+    var value: u32 = 0;
+    if (continious) {
+        value = @as(u32, 1) << 12;
+    }
+    value |= scale;
+
+    _ = aon.store(value, .Release);
+
+    if (irq_on) plicIrqReg(2, true);
+}
+
+pub fn rtcSetNextIrq(ticks: u32) void {
+    const cmp = @ptrCast(*Atomic(u32), &aon_map._aon_domain_rtccmp0);
+    _ = cmp.store(ticks, .Release);
+}
+
+pub fn rtcGetTickCount() u32 {
+    const cs = @ptrCast(*Atomic(u32), &aon_map._aon_domain_rtcs);
+    return cs.load(.Acquire);
 }
 
 // The interrupt codes that might be parsed from mcause.
@@ -198,22 +269,28 @@ comptime {
     @export(vectorBase, .{ .name = "_kernel_isr" });
 }
 
-pub fn enableInterrupts() void {
-    const val: u32 = 0x0808;
+pub fn enableInterrupts(software: bool, timer: bool, external: bool) void {
+    var val: u32 = 0;
+
+    if (software) val |= 0x0008;
+    if (timer) val |= 0x0080;
+    if (external) val |= 0x0800;
+
     _ = asm volatile (
         \\ csrw mie, a0
         :
-        : [val] "{a0}" (val)
+        : [val] "{a0}" (val),
         : "memory", "a0"
     );
 }
 
 /// The base ISR that should be specified in the mtvec register.
 /// Params: epc, cause, hart_id, status
-fn vectorBase(_: u32, cause: u32, _: u32, _: u32) callconv(.C) void {
+fn vectorBase(_: u32, cause: u32, _: u32, _: u32) linksection(".fast") callconv(.C) void {
     if (isIrq(cause)) {
         switch (parseIrqCode(cause)) {
             .MachineExternal => plicIrqHandle(),
+            .MachineTimer => clintTimerIrqHandle(),
             else => asm volatile ("nop"), // TODO: Handle the rest of the instructions.
         }
     } else {
@@ -255,6 +332,12 @@ fn parseFaultCode(cause: u32) FaultCode {
     };
 }
 
+fn clintTimerIrqHandle() void {
+    if (clintTimerVector) |vec| {
+        vec.isr();
+    }
+}
+
 fn plicIrqHandle() void {
     const irq_src = plicIrqClaim();
     defer plicIrqComplete(irq_src);
@@ -290,10 +373,10 @@ fn gpioIrqHandle(pin: u32) void {
 
 fn gpioIrqComplete(pin: u32) void {
     const reg = @ptrCast(*GpioInst, &_periph_gpio_start);
-    @atomicStore(u32, &reg.rise_irq_pending, @as(u32, 1) << @intCast(u5, pin), .Release);
+    _ = reg.rise_irq_pending.bitSet(@intCast(u5, pin), .Release);
 }
 
-pub const GpioVector = struct {
+pub const Vector = struct {
     vector: fn (*Self) void,
 
     const Self = @This();
@@ -303,7 +386,8 @@ pub const GpioVector = struct {
     }
 };
 
-var gpioVectorTable = [_]?*GpioVector{null} ** 32;
+var gpioVectorTable = [_]?*Vector{null} ** 32;
+var clintTimerVector: ?*Vector = null;
 
 pub fn uartInstanceCount() usize {
     return @ptrToInt(&_periph_uart_instance_count);
@@ -385,9 +469,9 @@ const PrciInst = extern struct {
     procmoncfg: u32,
 };
 
-/// Calculates and returns the current operating freuency of the CPU.
+/// Calculates and returns the current operating frequency of the MCU hart.
 /// FIXME: Needs to be verified carefully. Unchecked. No tests.
-fn operatingFrequency() u32 {
+pub fn operatingFrequency() u32 {
     const prci = @ptrCast(*PrciInst, &_prci_start);
 
     const pll = @atomicLoad(u32, &prci.pllcfg, .Acquire);

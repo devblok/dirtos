@@ -10,10 +10,10 @@ pub const Pin = struct {
     const Options = struct {
         mode: PinMode,
         irq_prio: u8 = 0,
-        rise_irq: ?*arch.GpioVector = null,
-        fall_irq: ?*arch.GpioVector = null,
-        high_irq: ?*arch.GpioVector = null,
-        low_irq: ?*arch.GpioVector = null,
+        rise_irq: ?*arch.Vector = null,
+        fall_irq: ?*arch.Vector = null,
+        high_irq: ?*arch.Vector = null,
+        low_irq: ?*arch.Vector = null,
     };
 
     const PinMode = enum {
@@ -77,7 +77,7 @@ pub fn PinIsr(comptime Context: type) type {
     return struct {
         ctx: Context,
         isr: fn (*Context) void,
-        vector: arch.GpioVector,
+        vector: arch.Vector,
 
         const Self = @This();
 
@@ -89,7 +89,7 @@ pub fn PinIsr(comptime Context: type) type {
             };
         }
 
-        fn isr(vector: *arch.GpioVector) void {
+        fn isr(vector: *arch.Vector) void {
             const self = @fieldParentPtr(Self, "vector", vector);
             self.isr(&self.ctx);
         }

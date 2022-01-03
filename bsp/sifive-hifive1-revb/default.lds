@@ -22,6 +22,40 @@ ISR_STACK_SIZE = 0x200;
 
 SECTIONS
 {
+    _aon_domain_start = 0x10000000;
+    _aon_domain_end = 0x10000FFF;
+    _aon_domain_wdogcfg = _aon_domain_start;
+    _aon_domain_wdogcount = _aon_domain_start + 0x08;
+    _aon_domain_wdogs = _aon_domain_start + 0x10;
+    _aon_domain_wdogfeed = _aon_domain_start + 0x18;
+    _aon_domain_wdogkey = _aon_domain_start + 0x1C;
+    _aon_domain_wdogcmp0 = _aon_domain_start + 0x20;
+    _aon_domain_rtccfg = _aon_domain_start + 0x40;
+    _aon_domain_rtccountlo = _aon_domain_start + 0x48;
+    _aon_domain_rtccounthi = _aon_domain_start + 0x4C;
+    _aon_domain_rtcs = _aon_domain_start + 0x50;
+    _aon_domain_rtccmp0 = _aon_domain_start + 0x60;
+    _aon_domain_lfrosccfg = _aon_domain_start + 0x70;
+    _aon_domain_lfclkmux = _aon_domain_start + 0x7C;
+    _aon_domain_backup_start = _aon_domain_start + 0x80;
+    _aon_domain_backup_count = 16; /* Should be 32, investigate other memory maps */
+    _aon_domain_pmuwakeup_start = _aon_domain_start + 0x100;
+    _aon_domain_pmuwakeup_count = 8;
+    _aon_domain_pmusleep_start = _aon_domain_start + 0x120;
+    _aon_domain_pmusleep_count = 8;
+    _aon_domain_pmuie = _aon_domain_start + 0x140;
+    _aon_domain_pmucause = _aon_domain_start + 0x144;
+    _aon_domain_pmusleep = _aon_domain_start + 0x148;
+    _aon_domain_pmukey = _aon_domain_start + 0x14C;
+    _aon_domain_SiFiveBandgap = _aon_domain_start + 0x210;
+    _aon_domain_aoncfg = _aon_domain_start + 0x300;
+
+    _clint_start = 0x2000000;
+    _clint_hart0_msip = _clint_start;
+    _clint_hart0_mtimecmp = _clint_start + 0x4000;
+    _clint_hart0_mtime = _clint_start + 0xBFF8;
+    _clint_end = 0x200c000;
+
     _periph_gpio_start = 0x10012000;
     _periph_gpio_end = 0x10011FFF;
 
