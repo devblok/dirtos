@@ -279,7 +279,7 @@ pub fn enableInterrupts(software: bool, timer: bool, external: bool) void {
     _ = asm volatile (
         \\ csrw mie, a0
         :
-        : [val] "{a0}" (val),
+        : [val] "{a0}" (val)
         : "memory", "a0"
     );
 }
@@ -462,53 +462,90 @@ pub fn uartWriteByte(instance: u32, byte: u8) UartError!void {
 }
 
 const PrciInst = extern struct {
-    hfrosccfg: u32,
-    hfxosccfg: u32,
-    pllcfg: u32,
-    plloutdiv: u32,
-    procmoncfg: u32,
+    hfrosccfg: Atomic(u32),
+    hfxosccfg: Atomic(u32),
+    pllcfg: Atomic(u32),
+    plloutdiv: Atomic(u32),
+    procmoncfg: Atomic(u32),
 };
+
+fn flag(comptime T: type, comptime bit: comptime_int) T {
+    return @as(T, 1) << bit;
+}
+
+fn maxValue(comptime T: type) T {
+    return @as(T, 1) << 8 * @sizeOf(T) - 1;
+}
+
+fn bits(comptime T: type, comptime from: comptime_int, comptime to: comptime_int) T {
+    const length = from - to;
+    const shift = @sizeOf(T) - length;
+    return maxValue(T) << shift >> shift << from;
+}
+
+fn hfroscFrquency(prci: *PrciInst) u32 {
+    // Get the required values.
+    const hfrosc = prci.hfrosccfg.load(.Acquire);
+    const trim = hfrosc & bits(u32, 16, 20);
+    const div = hfrosc & bits(u32, 0, 5);
+
+    // Get the trim frequency.
+    const freq = trim * 1_125_000;
+
+    // Final divide and return.
+    return freq / div;
+}
 
 /// Calculates and returns the current operating frequency of the MCU hart.
 /// FIXME: Needs to be verified carefully. Unchecked. No tests.
 pub fn operatingFrequency() u32 {
     const prci = @ptrCast(*PrciInst, &_prci_start);
 
-    const pll = @atomicLoad(u32, &prci.pllcfg, .Acquire);
-    const pllDiv = @atomicLoad(u32, &prci.plloutdiv, .Acquire);
+    const pll = prci.pllcfg.load(.Acquire);
 
-    // TODO: calculate the other oscillator.
-    const pllRef = if (pll & 0x00_02_00_00 == 0) unreachable else calcRingOscFreq(prci);
+    // NOTE: if pllref is:
+    // 		1 - Get external oscilator freq.
+    // 		0 - Get and calculate internal oscilator freq.
+    // 	if pllbypass is:
+    // 		1 - skip pll calc regardless
+    // 		0 - if pllref is on, calculate PLL
+    // 	if pllsel is:
+    // 		1 - we use PLL (or bypassed).
+    // 		0 - Use internal clock directly.
 
-    var pllOut: u32 = 0;
-    if (pll & 0x00_04_00_00 == 0) {
-        const pllR = (pll & 0x00_03) + 1;
-        const pllF = 2 * (((pll & 0x01_F0) >> 4) + 1);
-        const pllQ = (pll & 0x06_00) >> 10;
+    const pllref_on = (pll & flag(u32, 17)) != 0;
+    const pllsel_on = (pll & flag(u32, 16)) != 0;
+    const pllbypass_on = (pll & flag(u32, 18)) != 0;
 
-        var idx: u32 = 0;
-        var qVal: u32 = 1;
-        while (idx < pllQ) : (idx += 1) qVal *= 2;
-
-        pllOut = ((pllRef / pllR) * pllF) / qVal;
-    } else {
-        pllOut = pllRef;
+    // If internal oscilator is selected to drive the output directly,
+    // get it's frequency and return the result immediately.
+    if (!pllsel_on) {
+        return hfroscFrquency(prci);
     }
 
-    if (pllDiv & 0x01_00 == 0) {
-        const pllOutDiv = pllDiv & 0x00_1F;
-        return pllOut / pllOutDiv;
-    } else {
-        return pllOut;
+    // PLL is used. If the external oscilator is used the frequency is fixed,
+    // otherwise calculate the internal oscilator frquency and use that.
+    // The external oscilator is intended to be high precision.
+    const in_freq = if (pllref_on) 16 * 1_000_000 else hfroscFrquency(prci);
+
+    // If PLL is bypassed, no further calculation is needed.
+    if (pllbypass_on) return in_freq;
+
+    // Get PLL scaler values.
+    const pll_r = (pll & 0x00_03) + 1;
+    const pll_f = 2 * (((pll & 0x01_F0) >> 4) + 1);
+    const pll_q = (pll & 0x06_00) >> 10;
+
+    // Calculate the true pllq and the output frequency.
+    const q_val = @as(u32, 1) << @truncate(u5, pll_q);
+    const pll_out = ((in_freq / pll_r) * pll_f) / q_val;
+
+    // If final divider is enabled, calculate final frequency.
+    const pll_div = prci.plloutdiv.load(.Acquire);
+    if (pll_div & flag(u32, 8) == 0) {
+        const pllOutDiv = pll_div & 0x00_1F;
+        return pll_out / pllOutDiv;
     }
-}
 
-fn calcInternalOscFreq(prci: *PrciInst) u32 {
-    const val = @atomicLoad(u32, &prci.hfrosccfg, .Acquire);
-    return val;
-}
-
-fn calcRingOscFreq(prci: *PrciInst) u32 {
-    const val = @atomicLoad(u32, &prci.hfxosccfg, .Acquire);
-    return val;
+    return pll_out;
 }
