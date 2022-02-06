@@ -165,15 +165,15 @@ pub fn gpioPinRead(pin: u5) bool {
 }
 
 fn plicIrqReg(irq_src: u32, on: bool) void {
-    const reg = @ptrCast(*[2]u32, &_periph_plic_hart0_enables); // TODO: Move away from hardcoded length.
+    const reg = @ptrCast(*[2]Atomic(u32), &_periph_plic_hart0_enables); // TODO: Move away from hardcoded length.
 
     const idx = irq_src / 32;
     const off = @intCast(u5, irq_src % 32);
 
     if (on) {
-        _ = @atomicRmw(u32, &reg[idx], .Or, @as(u32, 1) << off, .Acquire);
+        _ = reg[idx].bitSet(off, .Acquire);
     } else {
-        _ = @atomicRmw(u32, &reg[idx], .Xor, @as(u32, 1) << off, .Acquire);
+        _ = reg[idx].bitReset(off, .Acquire);
     }
 }
 
@@ -221,12 +221,7 @@ pub fn clintSetTimerIrq(vec: *Vector) void {
 pub fn rtcConfigure(scale: u3, continious: bool, irq_on: bool) void {
     const aon = @ptrCast(*Atomic(u32), &aon_map._aon_domain_rtccfg);
 
-    var value: u32 = 0;
-    if (continious) {
-        value = @as(u32, 1) << 12;
-    }
-    value |= scale;
-
+    const value: u32 = if (continious) flag(u32, 12) | scale else scale;
     _ = aon.store(value, .Release);
 
     if (irq_on) plicIrqReg(2, true);
@@ -487,7 +482,7 @@ fn hfroscFrquency(prci: *PrciInst) u32 {
     // Get the required values.
     const hfrosc = prci.hfrosccfg.load(.Acquire);
     const trim = hfrosc & bits(u32, 16, 20);
-    const div = hfrosc & bits(u32, 0, 5);
+    const div = hfrosc & bits(u32, 0, 5) + 1;
 
     // Get the trim frequency.
     const freq = trim * 1_125_000;
@@ -548,4 +543,17 @@ pub fn operatingFrequency() u32 {
     }
 
     return pll_out;
+}
+
+pub fn rtcFrequency() u32 {
+    const lfoscmux = @ptrCast(*Atomic(u32), &aon_map._aon_domain_lfclkmux);
+    const alt_clk_on = lfoscmux.load(.Acquire) & flag(u32, 0) != 0;
+    return if (alt_clk_on) 32_768 else lfoscFrequency();
+}
+
+fn lfoscFrequency() u32 {
+    const lfosccfg = @ptrCast(*Atomic(u32), &aon_map._aon_domain_lfrosccfg);
+    const cfg = lfosccfg.load(.Acquire);
+    const trim = cfg & bits(u32, 16, 20);
+    const div = cfg & bits(u32, 0, 5) + 1;
 }
