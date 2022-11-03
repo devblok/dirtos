@@ -552,8 +552,9 @@ pub fn rtcFrequency() u32 {
 }
 
 fn lfoscFrequency() u32 {
-    const lfosccfg = @ptrCast(*Atomic(u32), &aon_map._aon_domain_lfrosccfg);
-    const cfg = lfosccfg.load(.Acquire);
-    const trim = cfg & bits(u32, 16, 20);
-    const div = cfg & bits(u32, 0, 5) + 1;
+    // TODO: finish lfosc frequency calculation.
+    // const lfosccfg = @ptrCast(*Atomic(u32), &aon_map._aon_domain_lfrosccfg);
+    // const cfg = lfosccfg.load(.Acquire);
+    // const trim = cfg & bits(u32, 16, 20);
+    // const div = cfg & bits(u32, 0, 5) + 1;
 }
