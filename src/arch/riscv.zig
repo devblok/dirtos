@@ -113,9 +113,11 @@ pub fn init() void {
     mem.copy(u8, dest[0..size], source[0..size]);
 }
 
-pub const wait = wfi();
+pub const wait = wfi;
 
-fn wfi() void {
+/// RISCV WFI instruction. WFI = Wait For Interrupt.
+/// Will stall on this function until an interrupt happens.
+fn wfi() linksection(".fast") void {
     asm volatile ("wfi");
 }
 
@@ -274,7 +276,7 @@ pub fn enableInterrupts(software: bool, timer: bool, external: bool) void {
     _ = asm volatile (
         \\ csrw mie, a0
         :
-        : [val] "{a0}" (val)
+        : [val] "{a0}" (val),
         : "memory", "a0"
     );
 }

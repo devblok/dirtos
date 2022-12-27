@@ -19,21 +19,22 @@ const Blink = struct {
         };
     }
 
+    fn setupOnce(self: *Blink) void {
+        if (!self.did_init) {
+            self.pin = Pin.init(self.pin_no, .{ .mode = .DigitalOutput });
+            self.did_init = true;
+        }
+    }
+
     fn taskRun(task: *Task) Task.Result {
         const self = @fieldParentPtr(Blink, "task", task);
         return .{ .next_time = self.run() };
     }
 
     fn run(self: *Blink) u64 {
-        if (!self.did_init) {
-            self.pin = Pin.init(self.pin_no, .{ .mode = .DigitalOutput });
-            self.did_init = true;
-        } else {
-            self.pin.toggle();
-            arch.sleep(100000); // For now delay only.
-        }
-
-        return 0; // TODO: Must be current time + next toggle.
+        self.setupOnce();
+        self.pin.toggle();
+        return arch.clockCounter(0) + 100000;
     }
 };
 
@@ -52,16 +53,21 @@ fn main() !void {
     const task_list = [_]*Task{
         &blink_task.task,
     };
+
     var scheduler = dirtos.initialize(task_list.len, task_list);
-    while (true) {
-        scheduler.tryRunNextTask();
-        // TODO: When ready, use WFI instruction to wait for timer interrupt.
+    while (!scheduler.tryRunNextTask()) {
+        scheduling.waitForWork();
     }
+    return error.Halt;
 }
 
 fn errorState() noreturn {
-    // TODO: Blink red LED. For now sleep forever.
+    // Disable all.
+    arch.enableInterrupts(false, false, false);
+
+    var redLed = Pin.init(22, .{ .mode = .DigitalOutput });
     while (true) {
+        redLed.toggle();
         arch.sleep(20000);
     }
 }

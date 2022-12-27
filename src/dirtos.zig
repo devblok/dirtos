@@ -30,12 +30,10 @@ pub fn initialize(
             };
         }
 
-        fn isr(vector: *arch.Vector) void {
+        fn isr(vector: *arch.Vector) linksection(".fast") void {
             const self = @fieldParentPtr(Self, "vector", vector);
-            self.scheduler.schedule();
-
-            const currentCycles = riscv.clintGetCycleCount(0);
-            riscv.clintSetTimeCmp(0, currentCycles + 50000);
+            const nextRequested = self.scheduler.schedule();
+            arch.setInterruptOnClock(0, nextRequested);
         }
     };
 

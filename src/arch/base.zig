@@ -10,6 +10,10 @@ pub const init = arch.init;
 pub const wait = arch.wait;
 pub const config = arch.config;
 
+// Clock related functions.
+pub const clockCounter = arch.clintGetCycleCount;
+pub const setInterruptOnClock = arch.clintSetTimeCmp;
+
 /// Puts cpu to sleep for given number of CPU cycles.
 pub fn sleep(loops: u32) void {
     @call(.{ .modifier = .never_inline }, arch.sleep, .{loops});

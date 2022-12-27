@@ -3,7 +3,13 @@ const sort = std.sort.sort;
 const assert = std.debug.assert;
 const Atomic = std.atomic.Atomic;
 const Allocator = std.mem.Allocator;
+
+const arch = @import("arch/base.zig");
 const Task = @import("task.zig").Task;
+
+pub const Error = error{
+    Halt, // Scheduler must halt.
+};
 
 /// The main scheduler for this OS. It is completely unfair and will always
 /// prefer higher priority tasks to run, if they're ready to.
@@ -44,19 +50,29 @@ pub fn Scheduler(
 
         /// Will schedule next task to run if able. Only one such function
         /// must run at one time. Is designed to run in ISR context.
-        pub fn schedule(self: *Self) linksection(".fast") void {
+        /// Returns the requested cycle count (time) of the next scheduler run.
+        pub fn schedule(self: *Self) linksection(".fast") u64 {
             if (self.nextTaskWithStatus(.Suspended)) |idx| {
                 if (self.isDueToStage(idx)) {
                     self.async_frames[idx] = async self.stageTask(idx);
                 }
             }
+
+            // Determine when the next scheduler run should happen.
+            var lowest: u64 = arch.clockCounter(0) + 5000; // FIXME: Default should be configurable.
+            for (self.tasks) |*t| {
+                if (t.status.load(.Acquire) == .Suspended and t.next < lowest) lowest = t.next;
+            }
+            return lowest;
         }
 
         /// Finds the highest priority available tasks to run and runs it until completion
-        /// or until the task blocks for some reason.
-        pub fn tryRunNextTask(self: *Self) linksection(".fast") void {
+        /// or until the task blocks for some reason. Returned boolean is a halt condition
+        /// indication. If true is returned, wait loop should be exited.
+        pub fn tryRunNextTask(self: *Self) linksection(".fast") bool {
             if (self.nextTaskWithStatus(.Staged)) |idx| {
                 const task = &self.tasks[idx];
+                // const frame = &self.async_frames[idx];
 
                 // If we manage to set the task into a running state, it's now safe
                 // to resume the task on the thread that this method is running on.
@@ -80,11 +96,12 @@ pub fn Scheduler(
 
                 if (run) resume task.frame;
             }
+            return false; // TODO: True is impossible right now.
         }
 
         /// Checks if the task is ready to be scheduled.
         fn isDueToStage(self: *Self, idx: u32) linksection(".fast") bool {
-            return self.tasks[idx].next <= 0; // FIXME: has to check against current time.
+            return self.tasks[idx].next <= arch.clockCounter(0);
         }
 
         /// Prepares and submits the task frame for the hardware threads to execute.
@@ -115,6 +132,12 @@ pub fn Scheduler(
             return null;
         }
     };
+}
+
+/// Architecture dependant waiting routine that is used when there
+/// is no work available at the time.
+pub fn waitForWork() linksection(".fast") void {
+    arch.wait();
 }
 
 const sched_test = struct {
