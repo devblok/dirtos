@@ -1,4 +1,4 @@
-const arch = @import("./arch/uart.zig");
+const arch = @import("./arch/base.zig");
 
 pub const Error = error{NoSuchInstance} || arch.UartError;
 

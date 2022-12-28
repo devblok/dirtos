@@ -403,8 +403,8 @@ pub const UartError = error{
 
 fn uartInstance(inst: u32) UartError!*UartInst {
     return switch (inst) {
-        1 => @ptrCast(*UartInst, &_periph_uart_0_start),
-        2 => @ptrCast(*UartInst, &_periph_uart_1_start),
+        0 => @ptrCast(*UartInst, &_periph_uart_0_start),
+        1 => @ptrCast(*UartInst, &_periph_uart_1_start),
         else => error.BadInstance,
     };
 }
