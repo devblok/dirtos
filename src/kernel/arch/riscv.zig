@@ -113,6 +113,11 @@ pub fn init() void {
     mem.copy(u8, dest[0..size], source[0..size]);
 }
 
+pub fn setupSchedulerIsr(vector: *Vector) void {
+    clintSetTimerIrq(vector);
+    clintSetTimeCmp(0, clintGetCycleCount(0));
+}
+
 pub const wait = wfi;
 
 /// RISCV WFI instruction. WFI = Wait For Interrupt.

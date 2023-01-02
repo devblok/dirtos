@@ -1,9 +1,8 @@
-const Pin = @import("gpio.zig").Pin;
-const Task = @import("task.zig").Task;
-const Uart = @import("uart.zig").Uart;
-const scheduling = @import("sched.zig");
-const arch = @import("arch/base.zig");
+const builtin = @import("std").builtin;
 const dirtos = @import("dirtos.zig");
+const Task = dirtos.Task;
+const Pin = @import("gpio.zig").Pin;
+const Uart = @import("uart.zig").Uart;
 
 const Blink = struct {
     task: Task,
@@ -35,7 +34,7 @@ const Blink = struct {
     fn run(self: *Blink) u64 {
         self.setupOnce();
         self.pin.toggle();
-        return arch.clockCounter(0) + 20000;
+        return dirtos.clockCounter(0) + 20000;
     }
 };
 
@@ -69,7 +68,7 @@ const Print = struct {
 
     fn run(self: *Print) u64 {
         if (self.has_error) {
-            return arch.clockCounter(0) + 100000;
+            return dirtos.clockCounter(0) + 100000;
         }
 
         self.setupOnce();
@@ -82,7 +81,7 @@ const Print = struct {
                 else => self.setError(err),
             }
         }
-        return arch.clockCounter(0) + 100000;
+        return dirtos.clockCounter(0) + 100000;
     }
 
     fn setupOnce(self: *Print) void {
@@ -105,12 +104,6 @@ comptime {
 }
 
 fn start() callconv(.C) noreturn {
-    arch.sleep(20000);
-    main() catch errorState();
-    unreachable;
-}
-
-fn main() !void {
     var blink_task = Blink.init(19);
     var print_task = Print.init(0);
 
@@ -119,20 +112,10 @@ fn main() !void {
         &print_task.task,
     };
 
-    var scheduler = dirtos.initialize(task_list.len, task_list);
-    while (!scheduler.tryRunNextTask()) {
-        scheduling.waitForWork();
-    }
-    return error.Halt;
+    dirtos.initialize(task_list.len, task_list).threadRun();
+    unreachable;
 }
 
-fn errorState() noreturn {
-    // Disable all.
-    arch.enableInterrupts(false, false, false);
-
-    var redLed = Pin.init(22, .{ .mode = .DigitalOutput });
-    while (true) {
-        redLed.toggle();
-        arch.sleep(20000);
-    }
+pub fn panic(_: []const u8, _: ?*builtin.StackTrace) noreturn {
+    dirtos.errorState();
 }

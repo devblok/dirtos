@@ -13,6 +13,7 @@ pub const config = arch.config;
 // Clock related functions.
 pub const clockCounter = arch.clintGetCycleCount;
 pub const setInterruptOnClock = arch.clintSetTimeCmp;
+pub const setupSchedulerIsr = arch.setupSchedulerIsr;
 
 /// Puts cpu to sleep for given number of CPU cycles.
 pub fn sleep(loops: u32) void {

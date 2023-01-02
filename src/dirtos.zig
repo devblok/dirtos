@@ -1,11 +1,14 @@
-const scheduling = @import("sched.zig");
-const arch = @import("arch/base.zig");
-const riscv = @import("arch/riscv.zig");
-const Task = @import("task.zig").Task;
-
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const FixedBufferAllocator = std.heap.FixedBufferAllocator;
+
+const kernel = @import("kernel.zig");
+const Pin = @import("gpio.zig").Pin;
+
+// FIXME: Dirty hack until the scheduler is completed.
+pub const clockCounter = kernel.clockCounter;
+
+pub const Task = kernel.Task;
 
 const global = struct {
     var frequency: u32 = undefined;
@@ -13,46 +16,34 @@ const global = struct {
 
 pub fn initialize(
     comptime num_tasks: usize,
-    tasks: [num_tasks]*Task,
-) *scheduling.Scheduler(tasks.len, arch.config.multicore) {
-    const RtosScheduler = scheduling.Scheduler(num_tasks, arch.config.multicore);
-
-    const SchedulerIsr = struct {
-        vector: arch.Vector,
-        scheduler: *RtosScheduler,
-
-        const Self = @This();
-
-        pub fn init(scheduler: *RtosScheduler) Self {
-            return .{
-                .vector = .{ .vector = isr },
-                .scheduler = scheduler,
-            };
-        }
-
-        fn isr(vector: *arch.Vector) linksection(".fast") void {
-            const self = @fieldParentPtr(Self, "vector", vector);
-            const nextRequested = self.scheduler.schedule();
-            arch.setInterruptOnClock(0, nextRequested);
-        }
-    };
+    tasks: [num_tasks]*kernel.Task,
+) *kernel.Scheduler(tasks.len, kernel.Configuration.multicore) {
+    const Scheduler = kernel.Scheduler(num_tasks, kernel.Configuration.multicore);
 
     const local = struct {
-        var scheduler: RtosScheduler = .{};
-        var schedulerIsr: SchedulerIsr = undefined;
+        var scheduler: Scheduler = .{};
+        var schedulerIsr: Scheduler.Isr = undefined;
     };
 
-    arch.init();
-    riscv.disablePLIC();
-    arch.plicIrqMask(0);
+    kernel.initialize();
+    global.frequency = kernel.operatingFrequency();
 
-    global.frequency = arch.operatingFrequency();
     local.scheduler.init(tasks);
-    local.schedulerIsr = SchedulerIsr.init(&local.scheduler);
+    local.schedulerIsr = Scheduler.Isr.init(&local.scheduler);
+    kernel.setupSchedulerIsr(&local.schedulerIsr.vector);
 
-    riscv.clintSetTimerIrq(&local.schedulerIsr.vector);
-    riscv.clintSetTimeCmp(0, riscv.clintGetCycleCount(0));
-    arch.enableInterrupts(false, true, false);
+    kernel.enableInterrupts(false, true, false);
 
     return &local.scheduler;
+}
+
+pub fn errorState() noreturn {
+    // Disable all.
+    kernel.enableInterrupts(false, false, false);
+
+    var redLed = Pin.init(22, .{ .mode = .DigitalOutput });
+    while (true) {
+        redLed.toggle();
+        kernel.busySleep(20000);
+    }
 }

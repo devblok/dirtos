@@ -99,6 +99,12 @@ pub fn Scheduler(
             return false; // TODO: True is impossible right now.
         }
 
+        pub fn threadRun(self: *Self) void {
+            while (!self.tryRunNextTask()) {
+                Self.waitForWork();
+            }
+        }
+
         /// Checks if the task is ready to be scheduled.
         fn isDueToStage(self: *Self, idx: u32) linksection(".fast") bool {
             return self.tasks[idx].next <= arch.clockCounter(0);
@@ -131,13 +137,31 @@ pub fn Scheduler(
             }
             return null;
         }
-    };
-}
 
-/// Architecture dependant waiting routine that is used when there
-/// is no work available at the time.
-pub fn waitForWork() linksection(".fast") void {
-    arch.wait();
+        /// Architecture dependant waiting routine that is used when there
+        /// is no work available at the time.
+        fn waitForWork() linksection(".fast") void {
+            arch.wait();
+        }
+
+        pub const Isr = struct {
+            vector: arch.Vector,
+            scheduler: *Self,
+
+            pub fn init(scheduler: *Self) Isr {
+                return .{
+                    .vector = .{ .vector = isr },
+                    .scheduler = scheduler,
+                };
+            }
+
+            fn isr(vector: *arch.Vector) linksection(".fast") void {
+                const self = @fieldParentPtr(Isr, "vector", vector);
+                const nextRequested = self.scheduler.schedule();
+                arch.setInterruptOnClock(0, nextRequested);
+            }
+        };
+    };
 }
 
 const sched_test = struct {
@@ -169,20 +193,6 @@ const sched_test = struct {
         }
     };
 };
-
-// test "sorts tasks internally" {
-//     comptime var counter1 = sched_test.BrownieCounter.init(5);
-//     comptime var counter2 = sched_test.BrownieCounter.init(8);
-//
-//     const tasks = [_]*Task{
-//         &counter1.task,
-//         &counter2.task,
-//     };
-//
-//     var sched: Scheduler(tasks.len, tasks, false) = .{};
-//     try sched_test.expect(sched.tasks[0].ptr == &counter2.task);
-//     try sched_test.expect(sched.tasks[1].ptr == &counter1.task);
-// }
 
 test "scheduling cases" {
     const g = struct {
