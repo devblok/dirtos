@@ -211,6 +211,17 @@ pub fn sleep(loops: u32) void {
     }
 }
 
+pub fn getHartID() u32 {
+    var id: u32 = 0;
+    _ = asm volatile (
+        \\ csrr a0, mhartid
+        :
+        : [id] "{a0}" (id),
+        : "memory", "a0"
+    );
+    return id;
+}
+
 pub fn clintGetCycleCount(hart: u32) u64 {
     const mtime = @ptrCast([*]volatile u64, &clint_map._clint_hart0_mtime);
     return mtime[hart];
@@ -395,27 +406,33 @@ pub fn uartInstanceCount() usize {
     return @ptrToInt(&_periph_uart_instance_count);
 }
 
+pub const UartReadError = error{
+    RxQueueEmpty,
+};
+
+pub const UartWriteError = error{
+    TxQueueFull,
+};
+
 pub const UartError = error{
     BadInstance,
     BadBaudRate,
     InstanceBusy,
-    RxQueueEmpty,
-    TxQueueFull,
     InvalidStopBitCount,
     InvalidTxWatermark,
     InvalidRxWatermark,
-};
+} || UartWriteError || UartReadError;
 
-fn uartInstance(inst: u32) UartError!*UartInst {
+fn uartInstance(inst: u32) *UartInst {
     return switch (inst) {
         0 => @ptrCast(*UartInst, &_periph_uart_0_start),
         1 => @ptrCast(*UartInst, &_periph_uart_1_start),
-        else => error.BadInstance,
+        else => @panic("bad uart instance"),
     };
 }
 
 pub fn uartConfigure(inst: u32, baud: u32, stop_bits: u32, txcnt: u32, rxcnt: u32) UartError!void {
-    const reg = try uartInstance(inst);
+    const reg = uartInstance(inst);
 
     try uartSetBaudRate(reg, baud);
 
@@ -449,16 +466,42 @@ fn uartSetBaudRate(inst: *UartInst, baud: u32) UartError!void {
     @atomicStore(u32, &inst.baud_div, uartDiv, .Release);
 }
 
-pub fn uartReadByte(instance: u32) UartError!u8 {
-    const reg = try uartInstance(instance);
-    const val = @atomicLoad(u32, &reg.rx_data, .Acquire);
+/// Reads bytes to buffer until full or until receiving queue is empty.
+/// Higher level reader may try to read the incomplete buffer again until success.
+/// If a read is attempted on an empty buffer, functions returns RxQueueEmpty.
+pub fn uartReadBuffer(instance: u32, buffer: []u8) UartReadError!usize {
+    var read: usize = 0;
+    for (buffer) |*byte| {
+        byte.* = uartReadByte(uartInstance(instance)) catch |err| switch (err) {
+            error.RxQueueEmpty => return if (read > 1) read else err,
+            else => @panic("undefined error behavior"),
+        };
+        read += 1;
+    }
+    return read;
+}
 
-    // The last bit is set if queue is empty, so check if we're out of bounds.
+fn uartReadByte(reg: *UartInst) UartReadError!u8 {
+    const val = @atomicLoad(u32, &reg.rx_data, .Acquire);
     return if (val > 256) error.RxQueueEmpty else @intCast(u8, val);
 }
 
-pub fn uartWriteByte(instance: u32, byte: u8) UartError!void {
-    const reg = try uartInstance(instance);
+/// Writes bytes until done or until transmission queue fills up. The higher
+/// level writes may retry incomplete writes until successful.
+/// If a write is attempted on a full queue function returns TxQueueFull.
+pub fn uartWriteBuffer(instance: u32, buffer: []const u8) UartWriteError!usize {
+    var written: usize = 0;
+    for (buffer) |byte| {
+        uartWriteByte(uartInstance(instance), byte) catch |err| switch (err) {
+            error.TxQueueFull => return if (written > 0) written else err,
+            else => @panic("undefined error behavior"),
+        };
+        written += 1;
+    }
+    return written;
+}
+
+fn uartWriteByte(reg: *UartInst, byte: u8) UartWriteError!void {
     const prev = @atomicRmw(u32, &reg.tx_data, .Max, byte, .Acquire);
     if (prev > 256) return error.TxQueueFull;
 }

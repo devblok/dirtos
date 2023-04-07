@@ -1,3 +1,4 @@
+const io = @import("std").io;
 const arch = @import("./kernel/arch/base.zig");
 
 pub const Error = error{NoSuchInstance} || arch.UartError;
@@ -7,6 +8,8 @@ pub const Uart = struct {
     baud_rate: u32,
 
     const Self = @This();
+    pub const Reader = io.Reader(*Self, arch.UartReadError, read);
+    pub const Writer = io.Writer(*Self, arch.UartWriteError, write);
 
     const Options = struct {
         baud_rate: u32 = 115200,
@@ -24,16 +27,27 @@ pub const Uart = struct {
         };
     }
 
-    pub fn readByte(self: *Self) Error!u8 {
-        return try arch.uartReadByte(self.instance);
+    pub fn reader(self: *Self) Reader {
+        return .{ .context = self };
     }
 
-    pub fn write(self: *const Self, bytes: []const u8) Error!u64 {
-        var written: u64 = 0;
-        for (bytes) |byte| {
-            try arch.uartWriteByte(self.instance, byte);
-            written += 1;
-        }
-        return written;
+    pub fn writer(self: *Self) Writer {
+        return .{ .context = self };
+    }
+
+    fn read(self: *Self, buffer: []u8) arch.UartReadError!usize {
+        // TODO: Do initial read, if incomplete:
+        //   - setup signal (must unblock task)
+        //   - block task in scheduler
+        //   - suspend the task
+        return try arch.uartReadBuffer(self.instance, buffer);
+    }
+
+    fn write(self: *Self, buffer: []const u8) arch.UartWriteError!usize {
+        // TODO: Do initial write, if incomplete:
+        //   - setup the signal (must unblock task when fired)
+        //   - block task in scheduler
+        //   - suspend the task
+        return try arch.uartWriteBuffer(self.instance, buffer);
     }
 };

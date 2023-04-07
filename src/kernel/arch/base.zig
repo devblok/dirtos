@@ -20,6 +20,8 @@ pub fn sleep(loops: u32) void {
     @call(.{ .modifier = .never_inline }, arch.sleep, .{loops});
 }
 
+pub const getCoreID = arch.getHartID;
+
 // Enable IRQ via MIE register.
 pub const enableInterrupts = arch.enableInterrupts;
 
@@ -38,10 +40,14 @@ pub const gpioPinRead = arch.gpioPinRead;
 pub const gpioPinToggle = arch.gpioPinToggle;
 pub const Vector = arch.Vector;
 
-// UART functions.
+// UART errors.
 pub const UartError = arch.UartError;
+pub const UartWriteError = arch.UartWriteError;
+pub const UartReadError = arch.UartReadError;
+
+// UART functions.
 pub const uartInstanceCount = arch.uartInstanceCount;
 pub const uartSetBaudRate = arch.uartSetBaudRate;
-pub const uartReadByte = arch.uartReadByte;
 pub const uartConfigure = arch.uartConfigure;
-pub const uartWriteByte = arch.uartWriteByte;
+pub const uartReadBuffer = arch.uartReadBuffer;
+pub const uartWriteBuffer = arch.uartWriteBuffer;

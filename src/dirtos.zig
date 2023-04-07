@@ -15,10 +15,11 @@ const global = struct {
 };
 
 pub fn initialize(
+    comptime num_harts: u32,
     comptime num_tasks: usize,
     tasks: [num_tasks]*kernel.Task,
-) *kernel.Scheduler(tasks.len, kernel.Configuration.multicore) {
-    const Scheduler = kernel.Scheduler(num_tasks, kernel.Configuration.multicore);
+) *kernel.Scheduler(num_harts, tasks.len, kernel.Configuration.multicore) {
+    const Scheduler = kernel.Scheduler(num_harts, num_tasks, kernel.Configuration.multicore);
 
     const local = struct {
         var scheduler: Scheduler = .{};
@@ -28,10 +29,9 @@ pub fn initialize(
     kernel.initialize();
     global.frequency = kernel.operatingFrequency();
 
-    local.scheduler.init(tasks);
+    local.scheduler = Scheduler.init(tasks, 5000);
     local.schedulerIsr = Scheduler.Isr.init(&local.scheduler);
     kernel.setupSchedulerIsr(&local.schedulerIsr.vector);
-
     kernel.enableInterrupts(false, true, false);
 
     return &local.scheduler;

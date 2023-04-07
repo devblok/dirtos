@@ -7,7 +7,6 @@ pub const Task = struct {
 
     /// Describes the possible states that a Task can be in.
     pub const Status = enum(u32) {
-
         /// Task has been completed, waiting for next iteration.
         /// This is also the initial state of any task.
         Suspended,

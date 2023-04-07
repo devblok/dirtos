@@ -1,8 +1,28 @@
-const builtin = @import("std").builtin;
+const std = @import("std");
+const builtin = std.builtin;
+const fmt = std.fmt;
+const heap = std.heap;
+
 const dirtos = @import("dirtos.zig");
+const kernel = @import("kernel.zig");
 const Task = dirtos.Task;
 const Pin = @import("gpio.zig").Pin;
 const Uart = @import("uart.zig").Uart;
+
+const Heap = struct {
+    var buffer: [1024]u8 = undefined;
+    var allocator: heap.FixedBufferAllocator = undefined;
+
+    pub fn init() void {
+        allocator = heap.FixedBufferAllocator.init(&buffer);
+    }
+};
+
+const Config = struct {
+    const num_harts = 1;
+    const blink_interval = 20000;
+    const print_interval = 100000;
+};
 
 const Blink = struct {
     task: Task,
@@ -34,7 +54,7 @@ const Blink = struct {
     fn run(self: *Blink) u64 {
         self.setupOnce();
         self.pin.toggle();
-        return dirtos.clockCounter(0) + 20000;
+        return dirtos.clockCounter(0) + Config.blink_interval;
     }
 };
 
@@ -68,12 +88,12 @@ const Print = struct {
 
     fn run(self: *Print) u64 {
         if (self.has_error) {
-            return dirtos.clockCounter(0) + 100000;
+            return dirtos.clockCounter(0) + Config.print_interval;
         }
 
         self.setupOnce();
 
-        if (self.uart.write("Hello world!\n")) |written| {
+        if (self.uart.writer().write("Hello world!\n")) |written| {
             self.written_bytes += written;
         } else |err| {
             switch (err) {
@@ -81,7 +101,7 @@ const Print = struct {
                 else => self.setError(err),
             }
         }
-        return dirtos.clockCounter(0) + 100000;
+        return dirtos.clockCounter(0) + Config.print_interval;
     }
 
     fn setupOnce(self: *Print) void {
@@ -104,18 +124,39 @@ comptime {
 }
 
 fn start() callconv(.C) noreturn {
-    var blink_task = Blink.init(19);
-    var print_task = Print.init(0);
+    Heap.init();
+    var blink = Blink.init(19);
+    var print = Print.init(0);
 
     const task_list = [_]*Task{
-        &blink_task.task,
-        &print_task.task,
+        &blink.task,
+        &print.task,
     };
 
-    dirtos.initialize(task_list.len, task_list).threadRun();
+    dirtos.initialize(Config.num_harts, task_list.len, task_list).threadRun();
     unreachable;
 }
 
-pub fn panic(_: []const u8, _: ?*builtin.StackTrace) noreturn {
+pub fn panic(msg: []const u8, stack: ?*builtin.StackTrace) noreturn {
+    kernel.enableInterrupts(false, false, false);
+    kernel.busySleep(10000);
+
+    var uart = Uart.init(0, .{ .stop_bits = 1 }) catch unreachable;
+    writeAll(msg, uart.writer());
+    writeAll("\n", uart.writer());
+
+    const str = fmt.allocPrint(Heap.allocator.allocator(), "{}\n", .{stack}) catch "Error allocating stacktrace string\n";
+    writeAll(str, uart.writer());
     dirtos.errorState();
+}
+
+fn writeAll(msg: []const u8, writer: Uart.Writer) void {
+    var total: usize = 0;
+    while (total < msg.len) {
+        if (writer.write(msg)) |written| {
+            total += written;
+        } else |_| {
+            kernel.busySleep(10000);
+        }
+    }
 }

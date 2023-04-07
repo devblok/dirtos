@@ -1,8 +1,4 @@
-const std = @import("std");
-const sort = std.sort.sort;
-const assert = std.debug.assert;
-const Atomic = std.atomic.Atomic;
-const Allocator = std.mem.Allocator;
+const Atomic = @import("std").atomic.Atomic;
 
 const arch = @import("arch/base.zig");
 const Task = @import("task.zig").Task;
@@ -19,12 +15,14 @@ pub const Error = error{
 ///
 /// Tasks are given at compile time in decreasing order of priority.
 pub fn Scheduler(
+    comptime num_harts: usize,
     comptime num_tasks: usize,
     comptime use_lr_sc: bool, // Some MCUs cannot do atomic compare and swap.
 ) type {
     return struct {
+        interval: u64 = 0,
         tasks: [num_tasks]Context = undefined,
-        async_frames: [num_tasks]@Frame(stageTask) = undefined,
+        active_tasks: [num_harts]Atomic(?*Context) = undefined,
 
         const Self = @This();
 
@@ -35,17 +33,24 @@ pub fn Scheduler(
             frame: anyframe,
             status: Atomic(Task.Status),
             next: u64,
-        };
 
-        pub fn init(self: *Self, entries: [num_tasks]*Task) void {
-            for (self.tasks) |*t, i| {
-                t.* = .{
-                    .ptr = entries[i],
+            fn init(task: *Task) Context {
+                return .{
+                    .ptr = task,
                     .frame = undefined,
                     .status = Atomic(Task.Status).init(.Suspended),
                     .next = 0,
                 };
             }
+        };
+
+        pub fn init(entries: [num_tasks]*Task, interval: u64) Self {
+            var scheduler = Self{
+                .interval = interval,
+            };
+            for (scheduler.tasks) |*t, i| t.* = Context.init(entries[i]);
+            for (scheduler.active_tasks) |*t| t.* = Atomic(?*Context).init(null);
+            return scheduler;
         }
 
         /// Will schedule next task to run if able. Only one such function
@@ -53,17 +58,9 @@ pub fn Scheduler(
         /// Returns the requested cycle count (time) of the next scheduler run.
         pub fn schedule(self: *Self) linksection(".fast") u64 {
             if (self.nextTaskWithStatus(.Suspended)) |idx| {
-                if (self.isDueToStage(idx)) {
-                    self.async_frames[idx] = async self.stageTask(idx);
-                }
+                if (self.isDueToStage(idx)) _ = async self.scheduleTask(idx);
             }
-
-            // Determine when the next scheduler run should happen.
-            var lowest: u64 = arch.clockCounter(0) + 5000; // FIXME: Default should be configurable.
-            for (self.tasks) |*t| {
-                if (t.status.load(.Acquire) == .Suspended and t.next < lowest) lowest = t.next;
-            }
-            return lowest;
+            return self.getClosestDeadline();
         }
 
         /// Finds the highest priority available tasks to run and runs it until completion
@@ -72,7 +69,6 @@ pub fn Scheduler(
         pub fn tryRunNextTask(self: *Self) linksection(".fast") bool {
             if (self.nextTaskWithStatus(.Staged)) |idx| {
                 const task = &self.tasks[idx];
-                // const frame = &self.async_frames[idx];
 
                 // If we manage to set the task into a running state, it's now safe
                 // to resume the task on the thread that this method is running on.
@@ -94,15 +90,27 @@ pub fn Scheduler(
                     }
                 }
 
-                if (run) resume task.frame;
+                if (run) {
+                    var coreID = arch.getCoreID();
+                    self.active_tasks[coreID].store(task, .Release);
+                    defer self.active_tasks[coreID].store(null, .Release);
+
+                    resume task.frame;
+
+                    // Disabled this test because it might be invalid when blocking
+                    // IO comes into play. Some tasks might get here with unexpected states.
+                    // switch (task.status.load(.Acquire)) {
+                    //     .Running => @panic("Task state is Running after resume"),
+                    //     .Staged => @panic("Task state is Staged after resume"),
+                    //     else => {},
+                    // }
+                }
             }
             return false; // TODO: True is impossible right now.
         }
 
         pub fn threadRun(self: *Self) void {
-            while (!self.tryRunNextTask()) {
-                Self.waitForWork();
-            }
+            while (!self.tryRunNextTask()) Self.waitForWork();
         }
 
         /// Checks if the task is ready to be scheduled.
@@ -111,19 +119,13 @@ pub fn Scheduler(
         }
 
         /// Prepares and submits the task frame for the hardware threads to execute.
-        fn stageTask(self: *Self, idx: u32) linksection(".fast") void {
+        fn scheduleTask(self: *Self, idx: u32) linksection(".fast") void {
             const task = &self.tasks[idx];
             suspend {
                 task.frame = @frame();
                 task.status.store(.Staged, .Release);
             }
-            self.finalize(idx, task.ptr.run());
-        }
-
-        /// Stores the task results and resets status to Suspended.
-        fn finalize(self: *Self, idx: u32, result: Task.Result) linksection(".fast") void {
-            var task = &self.tasks[idx];
-            task.next = result.next_time;
+            task.next = task.ptr.run().next_time;
             task.status.store(.Suspended, .Release);
         }
 
@@ -136,6 +138,14 @@ pub fn Scheduler(
                 }
             }
             return null;
+        }
+
+        fn getClosestDeadline(self: *Self) u64 {
+            var lowest: u64 = arch.clockCounter(0) + 5000; // FIXME: Default should be configurable.
+            for (self.tasks) |*t| {
+                if (t.status.load(.Acquire) == .Suspended and t.next < lowest) lowest = t.next;
+            }
+            return lowest;
         }
 
         /// Architecture dependant waiting routine that is used when there
@@ -165,7 +175,7 @@ pub fn Scheduler(
 }
 
 const sched_test = struct {
-    const expect = std.testing.expect;
+    const expect = @import("std").testing.expect;
 
     const BrownieCounter = struct {
         brownies: u8,
@@ -209,12 +219,12 @@ test "scheduling cases" {
     try sched_test.expect(sched.tasks[0].status.load(.Acquire) == .Suspended);
 
     // We test that task gets staged and prepared to run.
-    sched.schedule();
+    _ = sched.schedule();
     try sched_test.expect(sched.tasks[0].status.load(.Acquire) == .Staged);
     try sched_test.expect(g.counter.brownies == 5);
 
     // Task must run until completion and get suspended.
-    sched.tryRunNextTask();
+    _ = sched.tryRunNextTask();
     try sched_test.expect(sched.tasks[0].status.load(.Acquire) == .Suspended);
     try sched_test.expect(sched.tasks[0].next == 85);
     try sched_test.expect(g.counter.brownies == 35);
