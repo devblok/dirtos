@@ -57,7 +57,7 @@ pub fn Scheduler(
         /// must run at one time. Is designed to run in ISR context.
         /// Returns the requested cycle count (time) of the next scheduler run.
         pub fn schedule(self: *Self) linksection(".fast") u64 {
-            if (self.nextTaskWithStatus(.Suspended)) |idx| {
+            while (self.nextTaskWithStatus(.Suspended)) |idx| {
                 if (self.isDueToStage(idx)) _ = async self.scheduleTask(idx);
             }
             return self.getClosestDeadline();

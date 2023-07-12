@@ -51,5 +51,10 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
+# Zig stuff
 **/zig-cache/
 **/zig-out/
+
+# Binaries and ASM
+dirtos
+dirtos.s

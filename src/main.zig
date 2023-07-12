@@ -21,6 +21,7 @@ const Heap = struct {
 const Config = struct {
     const num_harts = 1;
     const blink_interval = 20000;
+    const blink2_interval = 15000;
     const print_interval = 100000;
 };
 
@@ -28,13 +29,15 @@ const Blink = struct {
     task: Task,
     pin: Pin,
     pin_no: u5,
+    interval: u32,
     did_init: bool,
 
-    pub fn init(pin_no: u5) Blink {
+    pub fn init(pin_no: u5, interval: u32) Blink {
         return .{
             .task = .{ .runFn = taskRun },
             .pin = undefined,
             .pin_no = pin_no,
+            .interval = interval,
             .did_init = false,
         };
     }
@@ -54,7 +57,7 @@ const Blink = struct {
     fn run(self: *Blink) u64 {
         self.setupOnce();
         self.pin.toggle();
-        return dirtos.clockCounter(0) + Config.blink_interval;
+        return dirtos.clockCounter(0) + self.interval;
     }
 };
 
@@ -93,7 +96,7 @@ const Print = struct {
 
         self.setupOnce();
 
-        if (self.uart.writer().write("Hello world!\n")) |written| {
+        if (self.uart.writer().write("Donut!\n")) |written| {
             self.written_bytes += written;
         } else |err| {
             switch (err) {
@@ -125,11 +128,13 @@ comptime {
 
 fn start() callconv(.C) noreturn {
     Heap.init();
-    var blink = Blink.init(19);
+    var blink = Blink.init(21, Config.blink_interval);
+    var blink2 = Blink.init(19, Config.blink2_interval);
     var print = Print.init(0);
 
     const task_list = [_]*Task{
         &blink.task,
+        &blink2.task,
         &print.task,
     };
 
@@ -145,8 +150,10 @@ pub fn panic(msg: []const u8, stack: ?*builtin.StackTrace) noreturn {
     writeAll(msg, uart.writer());
     writeAll("\n", uart.writer());
 
-    const str = fmt.allocPrint(Heap.allocator.allocator(), "{}\n", .{stack}) catch "Error allocating stacktrace string\n";
-    writeAll(str, uart.writer());
+    if (stack) |have_stack| {
+        const str = fmt.allocPrint(Heap.allocator.allocator(), "{}\n", .{have_stack}) catch "Error allocating stacktrace string\n";
+        writeAll(str, uart.writer());
+    }
     dirtos.errorState();
 }
 
